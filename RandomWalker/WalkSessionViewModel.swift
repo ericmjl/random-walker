@@ -20,6 +20,9 @@ final class WalkSessionViewModel {
     /// True while recomputing directions from the current GPS fix after a deviation.
     var isReplanningFromDeviation = false
 
+    /// When set, turn-by-turn UI shows this maneuver index instead of the live GPS step (user paging).
+    var navigationBrowseStepIndex: Int?
+
     private var routeNavigator: WalkRouteNavigator?
 
     @ObservationIgnored
@@ -262,6 +265,26 @@ final class WalkSessionViewModel {
         routeNavigator?.steps.count ?? 0
     }
 
+    /// Index used for on-screen directions and map annotations (browse override or live step).
+    var navigationDisplayedStepIndex: Int {
+        guard let nav = routeNavigator, !nav.steps.isEmpty else { return 0 }
+        let maxIdx = nav.steps.count - 1
+        let live = min(max(0, nav.currentIndex), maxIdx)
+        if let browse = navigationBrowseStepIndex {
+            return min(max(0, browse), maxIdx)
+        }
+        return live
+    }
+
+    /// True when the user is viewing a different step than the live GPS maneuver.
+    var isBrowsingAwayFromLiveNavigationStep: Bool {
+        navigationBrowseStepIndex != nil && navigationDisplayedStepIndex != navigationStepIndex
+    }
+
+    func clearNavigationBrowse() {
+        navigationBrowseStepIndex = nil
+    }
+
     func startNavigation(seedLocation: CLLocation?, connectivity: PhoneConnectivityManager) {
         guard let walk = refinedWalk else { return }
         let steps = WalkRouteNavigator.flattenedSteps(from: walk)
@@ -277,6 +300,7 @@ final class WalkSessionViewModel {
             recordedNavigationPath.append(coord)
         }
         routeNavigator = WalkRouteNavigator(steps: steps)
+        navigationBrowseStepIndex = nil
         navigationCompletionNotice = nil
         isNavigating = true
 
@@ -296,6 +320,7 @@ final class WalkSessionViewModel {
         connectivity.clearWalkOnWatch()
         isNavigating = false
         routeNavigator = nil
+        navigationBrowseStepIndex = nil
         navigationCompletionNotice = nil
         recordedNavigationPath = []
         navigationStartedAt = nil
@@ -324,6 +349,7 @@ final class WalkSessionViewModel {
     func acknowledgeNavigationCompletion() {
         navigationCompletionNotice = nil
         routeNavigator = nil
+        navigationBrowseStepIndex = nil
         recordedNavigationPath = []
         navigationStartedAt = nil
         navigationStartCoordinate = nil
@@ -346,6 +372,9 @@ final class WalkSessionViewModel {
         guard isNavigating, var navigator = routeNavigator else { return }
         appendRecordedSample(location.coordinate)
         navigator.ingest(userLocation: location)
+        if navigationBrowseStepIndex == navigator.currentIndex {
+            navigationBrowseStepIndex = nil
+        }
         routeNavigator = navigator
 
         if navigator.isComplete {
@@ -353,6 +382,7 @@ final class WalkSessionViewModel {
             let blueprint = activeBlueprint
             isNavigating = false
             routeNavigator = nil
+            navigationBrowseStepIndex = nil
             guard let routed, let blueprint else { return }
             Task {
                 await finishSessionSaving(
@@ -371,23 +401,58 @@ final class WalkSessionViewModel {
     }
 
     func navigationInstructionText() -> String? {
-        guard let raw = routeNavigator?.currentStep?.instruction else { return nil }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "Continue" : trimmed
+        instructionDisplayString(at: navigationDisplayedStepIndex)
+    }
+
+    /// Instruction text for a specific maneuver index (paged UI).
+    func navigationInstructionTextForStep(at stepIndex: Int) -> String? {
+        instructionDisplayString(at: stepIndex)
     }
 
     func navigationThenText() -> String? {
-        guard let next = routeNavigator?.upcomingStep else { return nil }
-        let text = next.instruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : "Then \(text)"
+        thenDisplayString(afterStepIndex: navigationDisplayedStepIndex)
+    }
+
+    /// “Then …” text when the given index is the current maneuver.
+    func navigationThenTextForStep(after stepIndex: Int) -> String? {
+        thenDisplayString(afterStepIndex: stepIndex)
     }
 
     func distanceToNavigationManeuver(from location: CLLocation) -> CLLocationDistance? {
-        routeNavigator?.distanceToCurrentManeuver(from: location)
+        distanceToManeuver(forStepIndex: navigationDisplayedStepIndex, from: location)
+    }
+
+    func distanceToManeuver(forStepIndex stepIndex: Int, from location: CLLocation) -> CLLocationDistance? {
+        guard let coord = maneuverCoordinate(forStepIndex: stepIndex) else { return nil }
+        let end = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+        return location.distance(from: end)
     }
 
     func maneuverCoordinateForNavigation() -> CLLocationCoordinate2D? {
-        routeNavigator?.currentStep?.maneuverCoordinate
+        maneuverCoordinate(forStepIndex: navigationDisplayedStepIndex)
+    }
+
+    func maneuverCoordinate(forStepIndex stepIndex: Int) -> CLLocationCoordinate2D? {
+        guard let nav = routeNavigator,
+              stepIndex >= 0,
+              stepIndex < nav.steps.count else { return nil }
+        return nav.steps[stepIndex].maneuverCoordinate
+    }
+
+    private func instructionDisplayString(at stepIndex: Int) -> String? {
+        guard let nav = routeNavigator,
+              stepIndex >= 0,
+              stepIndex < nav.steps.count else { return nil }
+        let raw = nav.steps[stepIndex].instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? "Continue" : raw
+    }
+
+    private func thenDisplayString(afterStepIndex stepIndex: Int) -> String? {
+        guard let nav = routeNavigator else { return nil }
+        let next = stepIndex + 1
+        guard next < nav.steps.count else { return nil }
+        let text = nav.steps[next].instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : "Then \(text)"
     }
 
     /// Re-fetches walking legs from the current fix through the rest of the planned waypoints.
@@ -412,6 +477,7 @@ final class WalkSessionViewModel {
                 nextVisitIndex: nextIdx
             )
             refinedWalk = resumed
+            navigationBrowseStepIndex = nil
             routeNavigator = WalkRouteNavigator(steps: WalkRouteNavigator.flattenedSteps(from: resumed))
             connectivity.sendActiveWalk(
                 resumed.makeWatchSnapshot(
@@ -448,6 +514,7 @@ final class WalkSessionViewModel {
                     let blueprint = activeBlueprint
                     isNavigating = false
                     routeNavigator = nil
+                    navigationBrowseStepIndex = nil
                     guard let routed, let blueprint else { return }
                     Task {
                         await finishSessionSaving(
@@ -498,6 +565,7 @@ final class WalkSessionViewModel {
     private func clearNavigationAfterSessionEnds(connectivity: PhoneConnectivityManager) {
         isNavigating = false
         routeNavigator = nil
+        navigationBrowseStepIndex = nil
         recordedNavigationPath = []
         navigationStartedAt = nil
         navigationStartCoordinate = nil

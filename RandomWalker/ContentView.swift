@@ -170,7 +170,8 @@ struct PlanWalkView: View {
                     isNavigating: false,
                     userCourse: userCourseFromLocation,
                     maneuverCoordinate: session.maneuverCoordinateForNavigation(),
-                    navigationStepIndex: session.navigationStepIndex
+                    navigationStepIndex: session.navigationStepIndex,
+                    isBrowsingStepsAwayFromLive: false
                 )
                 .frame(height: 320)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -187,30 +188,87 @@ struct PlanWalkView: View {
         }
     }
 
+    /// Swipe selection for paging maneuvers vs live GPS step (see ``WalkSessionViewModel/navigationBrowseStepIndex``).
+    private var navigationStepPageSelection: Binding<Int> {
+        Binding(
+            get: { session.navigationDisplayedStepIndex },
+            set: { newValue in
+                let live = session.navigationStepIndex
+                let maxIdx = max(0, session.navigationStepCount - 1)
+                let clamped = min(max(0, newValue), maxIdx)
+                if clamped == live {
+                    session.clearNavigationBrowse()
+                } else {
+                    session.navigationBrowseStepIndex = clamped
+                }
+            }
+        )
+    }
+
+    /// Subtle edge chevrons: brighter when another step exists in that direction.
+    private var navigationPagerLeadingChevronOpacity: Double {
+        guard session.navigationStepCount > 1 else { return 0 }
+        return session.navigationDisplayedStepIndex > 0 ? 0.42 : 0.12
+    }
+
+    private var navigationPagerTrailingChevronOpacity: Double {
+        guard session.navigationStepCount > 1 else { return 0 }
+        let lastIndex = session.navigationStepCount - 1
+        return session.navigationDisplayedStepIndex < lastIndex ? 0.42 : 0.12
+    }
+
     /// During **Start walk**: turn-by-turn text plus live chase-map, heading arrow, and next-turn marker.
     @ViewBuilder
     private var turnByTurnWithMapView: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 8) {
-                if let primary = session.navigationInstructionText() {
-                    Text(primary)
-                        .font(.title2.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let loc = locationService.lastLocation,
-                   let meters = session.distanceToNavigationManeuver(from: loc) {
-                    Text("In \(PlanWalkView.formatDistanceMeters(meters))")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                }
-                if let then = session.navigationThenText() {
-                    Text(then)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 12) {
+            if session.navigationStepCount > 0 {
+                VStack(alignment: .leading, spacing: 8) {
+                    if session.navigationStepCount > 1 {
+                        ZStack {
+                            TabView(selection: navigationStepPageSelection) {
+                                ForEach(0 ..< session.navigationStepCount, id: \.self) { stepIdx in
+                                    navigationGuidancePage(stepIndex: stepIdx)
+                                        .tag(stepIdx)
+                                        .padding(.horizontal, 22)
+                                }
+                            }
+                            .tabViewStyle(.page(indexDisplayMode: .automatic))
+                            .accessibilityHint("Swipe left or right to view other steps on this route.")
+
+                            HStack(spacing: 0) {
+                                Image(systemName: "chevron.compact.left")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                                    .opacity(navigationPagerLeadingChevronOpacity)
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.compact.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                                    .opacity(navigationPagerTrailingChevronOpacity)
+                            }
+                            .padding(.horizontal, 2)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                        }
+                        .frame(minHeight: 172)
+                    } else if session.navigationStepCount == 1 {
+                        TabView(selection: navigationStepPageSelection) {
+                            navigationGuidancePage(stepIndex: 0)
+                                .tag(0)
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
+                        .frame(minHeight: 172)
+                    }
+
+                    if session.isBrowsingAwayFromLiveNavigationStep {
+                        Button("Follow live") {
+                            session.clearNavigationBrowse()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
             WalkMapCard(
                 coordinates: session.refinedWalk?.coordinates ?? [],
@@ -218,11 +276,39 @@ struct PlanWalkView: View {
                 isNavigating: true,
                 userCourse: userCourseFromLocation,
                 maneuverCoordinate: session.maneuverCoordinateForNavigation(),
-                navigationStepIndex: session.navigationStepIndex
+                navigationStepIndex: session.navigationDisplayedStepIndex,
+                isBrowsingStepsAwayFromLive: session.isBrowsingAwayFromLiveNavigationStep
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
+    }
+
+    @ViewBuilder
+    private func navigationGuidancePage(stepIndex: Int) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let primary = session.navigationInstructionTextForStep(at: stepIndex) {
+                Text(primary)
+                    .font(.title2.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let loc = locationService.lastLocation,
+               let meters = session.distanceToManeuver(forStepIndex: stepIndex, from: loc) {
+                Text("In \(PlanWalkView.formatDistanceMeters(meters))")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+            if let then = session.navigationThenTextForStep(after: stepIndex) {
+                Text(then)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Step \(stepIndex + 1) of \(session.navigationStepCount)")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -415,6 +501,8 @@ private struct WalkMapCard: View {
     var userCourse: CLLocationDirection?
     var maneuverCoordinate: CLLocationCoordinate2D?
     var navigationStepIndex: Int = 0
+    /// When true, map frames user + **displayed** maneuver (browsing). When false during navigation, chase camera stays on the user (live step).
+    var isBrowsingStepsAwayFromLive: Bool = false
 
     @State private var cameraPosition: MapCameraPosition = .automatic
     /// Avoids resetting zoom on every GPS tick; we only auto-frame when the route changes or the user first appears.
@@ -423,6 +511,71 @@ private struct WalkMapCard: View {
     @State private var navigationCameraHeading: CLLocationDirection = 0
 
     var body: some View {
+        withLocationAndManeuverHandlers(withNavigationCameraHandlers(mapWithPlanModeHandlers))
+    }
+
+    /// Breaks up modifier chains so the type checker can finish within the time limit.
+    @ViewBuilder
+    private func withNavigationCameraHandlers<V: View>(_ base: V) -> some View {
+        base
+            .onChange(of: navigationStepIndex) { _, _ in
+                if isNavigating { applyNavigationCamera() }
+            }
+            .onChange(of: isBrowsingStepsAwayFromLive) { _, _ in
+                if isNavigating { applyNavigationCamera() }
+            }
+            .onChange(of: isNavigating) { _, active in
+                if active {
+                    applyNavigationCamera()
+                } else {
+                    fitCameraToRouteOrUser()
+                }
+            }
+    }
+
+    @ViewBuilder
+    private func withLocationAndManeuverHandlers<V: View>(_ base: V) -> some View {
+        base
+            .onChange(of: userCoordinate?.latitude ?? 0) { _, _ in
+                if isNavigating { applyNavigationCamera() }
+            }
+            .onChange(of: userCoordinate?.longitude ?? 0) { _, _ in
+                if isNavigating { applyNavigationCamera() }
+            }
+            .onChange(of: maneuverCoordinate?.latitude ?? 0) { _, _ in
+                if isNavigating { applyNavigationCamera() }
+            }
+            .onChange(of: maneuverCoordinate?.longitude ?? 0) { _, _ in
+                if isNavigating { applyNavigationCamera() }
+            }
+            .onAppear {
+                fitCameraToRouteOrUser()
+            }
+    }
+
+    private var mapWithPlanModeHandlers: some View {
+        mapContent
+            .mapStyle(.standard(elevation: .realistic))
+            .onMapCameraChange(frequency: .onEnd) { context in
+                guard !isNavigating else { return }
+                cameraPosition = .camera(context.camera)
+            }
+            .onChange(of: coordinates.count) { _, _ in
+                if coordinates.count < 2 {
+                    didAutoFrameUserOnlyMap = false
+                }
+                fitCameraToRouteOrUser()
+            }
+            .onChange(of: userCoordinate == nil) { wasNil, isNilNow in
+                guard coordinates.count < 2, !isNavigating else { return }
+                let userJustAppeared = wasNil && !isNilNow
+                let needsInitialFrame = !didAutoFrameUserOnlyMap && !isNilNow
+                guard userJustAppeared || needsInitialFrame else { return }
+                fitCameraToRouteOrUser()
+            }
+    }
+
+    private var mapContent: some View {
         Map(position: $cameraPosition, interactionModes: .all) {
             if let userCoordinate {
                 if isNavigating {
@@ -444,48 +597,6 @@ private struct WalkMapCard: View {
                 MapPolyline(coordinates: coordinates)
                     .stroke(.blue, lineWidth: 6)
             }
-        }
-        .mapStyle(.standard(elevation: .realistic))
-        /// Keep `cameraPosition` in sync after user pinch / pan / rotate / tilt (plan mode only).
-        /// During navigation we drive the camera programmatically; committing `onMapCameraChange` here
-        /// can fight MapKit and **freeze the main thread** (watchdog → SIGTERM).
-        .onMapCameraChange(frequency: .onEnd) { context in
-            guard !isNavigating else { return }
-            cameraPosition = .camera(context.camera)
-        }
-        .onChange(of: coordinates.count) { _, _ in
-            if coordinates.count < 2 {
-                didAutoFrameUserOnlyMap = false
-            }
-            fitCameraToRouteOrUser()
-        }
-        .onChange(of: userCoordinate == nil) { wasNil, isNilNow in
-            guard coordinates.count < 2, !isNavigating else { return }
-            let userJustAppeared = wasNil && !isNilNow
-            let needsInitialFrame = !didAutoFrameUserOnlyMap && !isNilNow
-            guard userJustAppeared || needsInitialFrame else { return }
-            fitCameraToRouteOrUser()
-        }
-        .onChange(of: navigationStepIndex) { _, _ in
-            if isNavigating {
-                applyNavigationFollowCamera()
-            }
-        }
-        .onChange(of: isNavigating) { _, active in
-            if active {
-                applyNavigationFollowCamera()
-            } else {
-                fitCameraToRouteOrUser()
-            }
-        }
-        .onChange(of: userCoordinate?.latitude ?? 0) { _, _ in
-            if isNavigating { applyNavigationFollowCamera() }
-        }
-        .onChange(of: userCoordinate?.longitude ?? 0) { _, _ in
-            if isNavigating { applyNavigationFollowCamera() }
-        }
-        .onAppear {
-            fitCameraToRouteOrUser()
         }
     }
 
@@ -558,6 +669,34 @@ private struct WalkMapCard: View {
             partial.union(MKMapRect(origin: point, size: MKMapSize(width: 0, height: 0)))
         }
         let region = MKCoordinateRegion(rect)
+        cameraPosition = .region(region)
+    }
+
+    private func applyNavigationCamera() {
+        guard isNavigating else { return }
+        if isBrowsingStepsAwayFromLive {
+            applyBrowsingOverviewCamera()
+        } else {
+            applyNavigationFollowCamera()
+        }
+    }
+
+    /// North-up region showing both the user and the maneuver for the **browsed** step (so the map matches the card).
+    private func applyBrowsingOverviewCamera() {
+        guard let userCoordinate, let maneuverCoordinate else {
+            applyNavigationFollowCamera()
+            return
+        }
+        let locU = CLLocation(latitude: userCoordinate.latitude, longitude: userCoordinate.longitude)
+        let locM = CLLocation(latitude: maneuverCoordinate.latitude, longitude: maneuverCoordinate.longitude)
+        let separation = locU.distance(from: locM)
+        let center = CLLocationCoordinate2D(
+            latitude: (userCoordinate.latitude + maneuverCoordinate.latitude) / 2,
+            longitude: (userCoordinate.longitude + maneuverCoordinate.longitude) / 2
+        )
+        let span = max(separation * 1.85, 260)
+        let region = MKCoordinateRegion(center: center, latitudinalMeters: span, longitudinalMeters: span)
+        navigationCameraHeading = 0
         cameraPosition = .region(region)
     }
 

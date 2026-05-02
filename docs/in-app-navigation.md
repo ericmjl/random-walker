@@ -4,7 +4,7 @@ After a loop is **planned** (`planLoop`), **Start** begins guidance modeled on A
 
 ## Behavior
 
-- **UI (active guidance)**: Turn-by-turn text (instruction, **In …**, **Then …**) plus a **live map**: full route polyline, chase camera (heading from GPS **course** when valid, else bearing toward the maneuver), a **user puck** with a **white arrow** for direction of travel and (when that differs meaningfully from the bearing to the maneuver) a second **orange arrow** toward the upcoming turn, and an **orange “Turn” marker** at the next maneuver. The Plan marketing copy and tab bar stay hidden; **End walk** opens save/discard/cancel as before.
+- **UI (active guidance)**: Turn-by-turn text (instruction, **In …**, **Then …**) in a **paged** control: swipe horizontally to preview any step; page dots and **subtle edge chevrons** (stronger when another step exists that way) hint at paging without instructional copy. VoiceOver gets an accessibility hint on the pager. **Follow live** appears when the open page is not the live GPS step; while browsing, the map uses a **north-up overview** framed to show **your position and that page’s maneuver** (so street names match the card). On the **live** step, the map returns to the **chase camera** behind you. Distance **In …** uses your current GPS fix to the maneuver shown on the page. While you stay on the live step, GPS advances the maneuver; when your live step catches up to a step you had selected for browsing, browse mode clears. Below: **live map** with polyline, user puck (**white** travel arrow, optional **orange** bearing arrow), and **Turn** marker for the **displayed** maneuver. Tab bar stays hidden; **End walk** still opens save/discard/cancel.
 - **UI (planning / before Start)**: Map, status, **Start walk**, **New route**, and **Clear map** behave as before.
 - **Steps** come from MapKit’s walking `MKRoute` steps, flattened across all legs. Each step stores text, distances, and a **maneuver coordinate** (end of the step polyline) for progress and map annotations. While navigating, the map **follows** the user as the GPS fix updates (`WalkMapCard` reapplies the chase camera on coordinate changes).
 - **`WalkRouteNavigator`** keeps a current step index. On location updates, it requires **two consecutive** GPS readings within ~32 m of the maneuver point before advancing (reduces jitter).
@@ -18,10 +18,10 @@ After a loop is **planned** (`planLoop`), **Start** begins guidance modeled on A
 
 - `RandomWalker/WalkRouteNavigator.swift` — step list, `ingest`, bearing helper.
 - `RandomWalker/RoutingService.swift` — `RoutedStep.maneuverCoordinate`, `routeWalkingLoop`, `routeWalkingResume`.
-- `RandomWalker/WalkSessionViewModel.swift` — `planLoop(around:connectivity:walkingSpeedMetersPerSecond:)`, `startNavigation(seedLocation:connectivity:)`, `discardNavigationWithoutSaving(connectivity:)`, `stopAndSaveToHistory`, `replanFromCurrentLocation`, `ingestNavigationLocation`, `ingestWatchRecording`, private `persistWalk`, `onWalkSavedObservedPace` (pace learning).
+- `RandomWalker/WalkSessionViewModel.swift` — `planLoop`, `startNavigation`, `discardNavigationWithoutSaving`, `stopAndSaveToHistory`, `replanFromCurrentLocation`, `ingestNavigationLocation`, `ingestWatchRecording`, `navigationBrowseStepIndex` / `navigationDisplayedStepIndex`, per-step copy helpers, browse reset on replan / session end / when live catches the browsed step, `persistWalk`, `onWalkSavedObservedPace`.
+- `RandomWalker/ContentView.swift` — paged turn-by-turn during navigation, plan-mode map and **Start walk**, **End walk** + stop confirmation, `WalkMapCard` (plan vs guidance), location ingest, completion alert.
 - `RandomWalker/PhoneConnectivityManager.swift` — `sendActiveWalk`, `requestWatchRecording`, `clearWalkOnWatch`, `onWatchRecordedTrack`.
 - `RandomWalkerWatch/WatchWalkCoordinator.swift` — receives snapshots, records GPS, replies with `WatchRecordedTrack`.
-- `RandomWalker/ContentView.swift` — directions-only layout while navigating; plan-mode map and **Start walk**; **End walk** + stop confirmation; location-driven ingest with `modelContext`; completion alert; `WalkMapCard` in plan mode only.
 - `RandomWalker/WalkHistoryView.swift` — browse saved `WalkRecord`s.
 - `RandomWalkerCore/ActiveWalkSnapshot.swift` — `WatchRecordedTrack`, `WatchMessageKey`.
 
