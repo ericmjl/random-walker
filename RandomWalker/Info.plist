@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>Random Walker</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Random Walker needs your location to build walking loops that start and end where you are.</string>
+	<key>UILaunchScreen</key>
+	<dict/>
+</dict>
+</plist>

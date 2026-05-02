@@ -1,0 +1,11 @@
+# SwiftPM / local tool output
+.build/
+
+# Xcode
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+
+# macOS
+.DS_Store
