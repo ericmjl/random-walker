@@ -46,6 +46,7 @@ struct PlanWalkView: View {
     @ObservedObject var connectivity: PhoneConnectivityManager
     @Bindable var session: WalkSessionViewModel
     @State private var isResolvingLocation = false
+    @State private var showStopGuidanceConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -72,12 +73,27 @@ struct PlanWalkView: View {
                 if session.refinedWalk != nil {
                     if session.isNavigating {
                         Button(role: .cancel) {
-                            session.stopNavigation()
+                            showStopGuidanceConfirmation = true
                         } label: {
                             Label("Stop guidance", systemImage: "stop.circle")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
+                        .confirmationDialog(
+                            "Stop guidance?",
+                            isPresented: $showStopGuidanceConfirmation,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Save to history") {
+                                session.stopAndSaveToHistory(modelContext: modelContext)
+                            }
+                            Button("Discard", role: .destructive) {
+                                session.discardNavigationWithoutSaving()
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("Save your GPS path so far, discard it, or keep navigating.")
+                        }
                     } else {
                         Button {
                             session.startNavigation(seedLocation: locationService.lastLocation)
@@ -158,6 +174,20 @@ struct PlanWalkView: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
+            Button {
+                Task {
+                    guard let loc = locationService.lastLocation else { return }
+                    await session.replanFromCurrentLocation(loc, connectivity: connectivity)
+                }
+            } label: {
+                if session.isReplanningFromDeviation {
+                    Label("Recalculating route…", systemImage: "arrow.triangle.2.circlepath")
+                } else {
+                    Label("Recalculate route from here", systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(session.isReplanningFromDeviation || locationService.lastLocation == nil)
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)

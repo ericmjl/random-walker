@@ -18,24 +18,38 @@ final class WalkSessionViewModel {
     /// Shown once when automatic step progression reaches the end of the route.
     var navigationCompletionNotice: String?
 
+    /// True while recomputing directions from the current GPS fix after a deviation.
+    var isReplanningFromDeviation = false
+
     private var routeNavigator: WalkRouteNavigator?
 
     @ObservationIgnored
     private var recordedNavigationPath: [CLLocationCoordinate2D] = []
     @ObservationIgnored
     private var navigationStartedAt: Date?
+    /// Where the user stood when **Start** was tapped (return-to-start completion).
+    @ObservationIgnored
+    private var navigationStartCoordinate: CLLocationCoordinate2D?
+    @ObservationIgnored
+    private var hasVenturedFromStart: Bool = false
+    @ObservationIgnored
+    private var returnToStartEnteredAt: Date?
 
     private let targetDuration: TimeInterval = 3_600
     private let durationToleranceLower: Double = 0.72
     private let durationToleranceUpper: Double = 1.38
     private let maxAttempts = 8
 
+    private static let returnToStartRadiusMeters: CLLocationDistance = 40
+    private static let returnToStartDwellSeconds: TimeInterval = 10
+    private static let ventureOutMinMeters: CLLocationDistance = 90
+
     func planHourLoop(
         around center: GeodesicWaypoint,
         connectivity: PhoneConnectivityManager
     ) async {
         guard !isPlanning else { return }
-        stopNavigation()
+        discardNavigationWithoutSaving()
         isPlanning = true
         planningError = nil
         refinementSummary = nil
@@ -96,6 +110,9 @@ final class WalkSessionViewModel {
         guard !steps.isEmpty else { return }
         recordedNavigationPath = []
         navigationStartedAt = .now
+        navigationStartCoordinate = seedLocation?.coordinate ?? walk.coordinates.first
+        hasVenturedFromStart = false
+        returnToStartEnteredAt = nil
         if let coord = seedLocation?.coordinate {
             recordedNavigationPath.append(coord)
         }
@@ -104,12 +121,32 @@ final class WalkSessionViewModel {
         isNavigating = true
     }
 
-    func stopNavigation() {
+    /// Ends guidance without persisting (e.g. *Discard* on the stop confirmation).
+    func discardNavigationWithoutSaving() {
         isNavigating = false
         routeNavigator = nil
         navigationCompletionNotice = nil
         recordedNavigationPath = []
         navigationStartedAt = nil
+        navigationStartCoordinate = nil
+        hasVenturedFromStart = false
+        returnToStartEnteredAt = nil
+    }
+
+    /// Persists the trace so far, then ends guidance (planned route stays on the map).
+    func stopAndSaveToHistory(modelContext: ModelContext) {
+        guard isNavigating, let routed = refinedWalk, let blueprint = activeBlueprint else {
+            discardNavigationWithoutSaving()
+            return
+        }
+        persistWalk(
+            routed: routed,
+            blueprint: blueprint,
+            modelContext: modelContext,
+            completionKind: .savedOnStop
+        )
+        discardNavigationWithoutSaving()
+        navigationCompletionNotice = "Saved your walk so far to History."
     }
 
     func acknowledgeNavigationCompletion() {
@@ -117,6 +154,9 @@ final class WalkSessionViewModel {
         routeNavigator = nil
         recordedNavigationPath = []
         navigationStartedAt = nil
+        navigationStartCoordinate = nil
+        hasVenturedFromStart = false
+        returnToStartEnteredAt = nil
     }
 
     func ingestNavigationLocation(_ location: CLLocation, modelContext: ModelContext) {
@@ -124,20 +164,21 @@ final class WalkSessionViewModel {
         appendRecordedSample(location.coordinate)
         navigator.ingest(userLocation: location)
         routeNavigator = navigator
+
         if navigator.isComplete {
-            isNavigating = false
-            routeNavigator = nil
             if let routed = refinedWalk, let blueprint = activeBlueprint {
-                persistCompletedWalk(
+                finishSessionSaving(
                     routed: routed,
                     blueprint: blueprint,
-                    modelContext: modelContext
+                    completionKind: .guidedComplete,
+                    modelContext: modelContext,
+                    notice: "You finished the loop. Saved to History."
                 )
             }
-            navigationCompletionNotice = "You finished the loop. Saved to History."
-            recordedNavigationPath = []
-            navigationStartedAt = nil
+            return
         }
+
+        evaluateReturnToStartProximity(location: location, modelContext: modelContext)
     }
 
     func navigationInstructionText() -> String? {
@@ -160,6 +201,92 @@ final class WalkSessionViewModel {
         routeNavigator?.currentStep?.maneuverCoordinate
     }
 
+    /// Re-fetches walking legs from the current fix through the rest of the planned waypoints.
+    func replanFromCurrentLocation(_ location: CLLocation, connectivity: PhoneConnectivityManager) async {
+        guard isNavigating, let walk = refinedWalk, let blueprint = activeBlueprint, let navigator = routeNavigator
+        else { return }
+        guard !isReplanningFromDeviation else { return }
+
+        guard let nextIdx = walk.nextVisitSequenceIndex(afterNavigatorStep: navigator.currentIndex) else {
+            planningError = "Route already complete in guidance — nothing to recalculate."
+            return
+        }
+
+        isReplanningFromDeviation = true
+        planningError = nil
+        defer { isReplanningFromDeviation = false }
+
+        do {
+            let resumed = try await RoutingService.routeWalkingResume(
+                from: location.coordinate,
+                visitSequence: blueprint.visitSequenceCoordinates,
+                nextVisitIndex: nextIdx
+            )
+            refinedWalk = resumed
+            routeNavigator = WalkRouteNavigator(steps: WalkRouteNavigator.flattenedSteps(from: resumed))
+            connectivity.sendActiveWalk(resumed.makeWatchSnapshot(startedAt: navigationStartedAt ?? .now))
+            refinementSummary = "Updated route from your position."
+        } catch {
+            planningError = error.localizedDescription
+        }
+    }
+
+    private func evaluateReturnToStartProximity(location: CLLocation, modelContext: ModelContext) {
+        guard let anchor = navigationStartCoordinate else { return }
+        let anchorLoc = CLLocation(latitude: anchor.latitude, longitude: anchor.longitude)
+        let distanceFromStart = location.distance(from: anchorLoc)
+        let now = Date()
+
+        if distanceFromStart >= Self.ventureOutMinMeters {
+            hasVenturedFromStart = true
+        }
+        guard hasVenturedFromStart else { return }
+
+        if distanceFromStart <= Self.returnToStartRadiusMeters {
+            if let enteredAt = returnToStartEnteredAt {
+                if now.timeIntervalSince(enteredAt) >= Self.returnToStartDwellSeconds {
+                    if let routed = refinedWalk, let blueprint = activeBlueprint {
+                        finishSessionSaving(
+                            routed: routed,
+                            blueprint: blueprint,
+                            completionKind: .returnedToStart,
+                            modelContext: modelContext,
+                            notice:
+                            "You returned near your start. Saved to History."
+                        )
+                    }
+                }
+            } else {
+                returnToStartEnteredAt = now
+            }
+        } else {
+            returnToStartEnteredAt = nil
+        }
+    }
+
+    private func finishSessionSaving(
+        routed: RoutedWalk,
+        blueprint: LoopWalkBlueprint,
+        completionKind: WalkCompletionKind,
+        modelContext: ModelContext,
+        notice: String
+    ) {
+        persistWalk(
+            routed: routed,
+            blueprint: blueprint,
+            modelContext: modelContext,
+            completionKind: completionKind
+        )
+        isNavigating = false
+        routeNavigator = nil
+        navigationCompletionNotice = notice
+        recordedNavigationPath = []
+        navigationStartedAt = nil
+        navigationStartCoordinate = nil
+        hasVenturedFromStart = false
+        returnToStartEnteredAt = nil
+    }
+
     private func appendRecordedSample(_ coordinate: CLLocationCoordinate2D) {
         if let last = recordedNavigationPath.last {
             let previous = CLLocation(latitude: last.latitude, longitude: last.longitude)
@@ -173,11 +300,11 @@ final class WalkSessionViewModel {
 
     private static let recordedSampleMinSeparationMeters: CLLocationDistance = 8
 
-    /// Writes history only after a **completed** Start session (not after planning).
-    private func persistCompletedWalk(
+    private func persistWalk(
         routed: RoutedWalk,
         blueprint: LoopWalkBlueprint,
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        completionKind: WalkCompletionKind
     ) {
         let pathCoordinates: [CLLocationCoordinate2D]
         let distanceMeters: CLLocationDistance
@@ -203,7 +330,8 @@ final class WalkSessionViewModel {
             blueprintSalt: blueprint.randomSalt,
             centerLatitude: blueprint.center.latitude,
             centerLongitude: blueprint.center.longitude,
-            title: titleDate
+            title: titleDate,
+            completionKindRaw: completionKind.rawValue
         )
 
         modelContext.insert(record)
@@ -228,7 +356,7 @@ final class WalkSessionViewModel {
     }
 
     func clearActiveWalk(connectivity: PhoneConnectivityManager) {
-        stopNavigation()
+        discardNavigationWithoutSaving()
         refinedWalk = nil
         activeBlueprint = nil
         connectivity.clearWalkOnWatch()

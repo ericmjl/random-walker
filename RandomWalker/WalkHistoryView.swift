@@ -4,6 +4,7 @@ import MapKit
 import RandomWalkerCore
 
 struct WalkHistoryView: View {
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \WalkRecord.createdAt, order: .reverse) private var walks: [WalkRecord]
 
     var body: some View {
@@ -13,7 +14,9 @@ struct WalkHistoryView: View {
                     ContentUnavailableView(
                         "No walks yet",
                         systemImage: "figure.walk",
-                        description: Text("Plan a loop, tap Start, and finish the guided route to save it here.")
+                        description: Text(
+                            "Plan a loop and tap Start. History saves when you finish guidance, return near your start after walking out, or choose Save when you stop early."
+                        )
                     )
                 } else {
                     List {
@@ -24,6 +27,9 @@ struct WalkHistoryView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(record.title.isEmpty ? "Walk" : record.title)
                                         .font(.headline)
+                                    Text(record.completionKind.historyListSubtitle)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                     Text(
                                         "\(Int(record.routedExpectedDurationSeconds / 60)) min • \(Int(record.routedDistanceMeters)) m"
                                     )
@@ -33,10 +39,17 @@ struct WalkHistoryView: View {
                                 .padding(.vertical, 4)
                             }
                         }
+                        .onDelete(perform: deleteWalks)
                     }
                 }
             }
             .navigationTitle("History")
+        }
+    }
+
+    private func deleteWalks(at offsets: IndexSet) {
+        for index in offsets {
+            modelContext.delete(walks[index])
         }
     }
 }
@@ -54,6 +67,10 @@ private struct WalkRecordDetailView: View {
                     .font(.title2.bold())
 
                 Text("Distance: \(Int(record.routedDistanceMeters)) meters")
+                    .foregroundStyle(.secondary)
+
+                Text(record.completionKind.historyListSubtitle)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
 
                 Map(position: $cameraPosition) {

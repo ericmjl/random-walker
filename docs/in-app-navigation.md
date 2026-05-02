@@ -6,16 +6,17 @@ After a loop is **planned** (`planHourLoop`), **Start** begins guidance modeled 
 
 - **Steps** come from MapKit’s walking `MKRoute` steps, flattened across all legs. Each step stores text, distances, and a **maneuver coordinate** (end of the step polyline) for progress and map heading.
 - **`WalkRouteNavigator`** keeps a current step index. On location updates, it requires **two consecutive** GPS readings within ~32 m of the maneuver point before advancing (reduces jitter).
-- **UI**: Primary instruction, **distance to maneuver** (straight-line), **“Then …”** preview, and step index. **Stop guidance** ends the session without clearing the route.
+- **UI**: Primary instruction, **distance to maneuver** (straight-line), **“Then …”** preview, and step index. **Stop guidance** opens a confirmation: **Save to history**, **Discard**, or cancel. **Recalculate route from here** calls `RoutingService.routeWalkingResume` from the current fix through the rest of the blueprint waypoints, replaces `refinedWalk` + guidance steps, and refreshes the watch snapshot.
 - **Map**: In navigation mode the map uses a **chase camera** (pitch + heading from GPS **course** when valid, otherwise bearing toward the maneuver). It recenters when **Start** is tapped and when the **step index** changes. While navigating, **`onMapCameraChange` does not write back** into `cameraPosition`, because that can fight programmatic camera updates and **hang the app** (watchdog kill / SIGTERM). In **plan** mode, pinch/zoom still syncs via `onMapCameraChange`.
-- **Completion**: When the last step is satisfied, guidance stops, a **`WalkRecord`** is written to **History**, and an alert confirms the loop is finished.
-- **History**: Only **completed** Start sessions are saved. While navigating, GPS is sampled about every **8 m**; if there are at least two points, that **trace** becomes the stored polyline and distance. With fewer samples, the **planned** polyline and routed distance are used as a fallback. **Stop guidance** throws away the recording without saving. Planning alone never creates a history row. See [history-and-persistence.md](history-and-persistence.md).
+- **Completion (guided)**: When the last step is satisfied, guidance stops, a **`WalkRecord`** is written (`guidedComplete`), and an alert confirms.
+- **Return-to-start**: After **Start**, if GPS moves **about 90 m** or farther from the start coordinate, then stays within **about 40 m** of that start for **about 10 s**, a **`WalkRecord`** is saved (`returnedToStart`) and guidance ends.
+- **History saves**: Same trace rules as before (~**8 m** sampling; ≥2 points → trace polyline, else planned route fallback). **Save to history** on stop uses `savedOnStop`. **Discard** on stop does not save. Planning alone never creates a row. See [history-and-persistence.md](history-and-persistence.md).
 
 ## Code touchpoints
 
 - `RandomWalker/WalkRouteNavigator.swift` — step list, `ingest`, bearing helper.
-- `RandomWalker/RoutingService.swift` — `RoutedStep.maneuverCoordinate` from each `MKRoute.Step` polyline.
-- `RandomWalker/WalkSessionViewModel.swift` — `planHourLoop`, `startNavigation(seedLocation:)`, `stopNavigation`, `ingestNavigationLocation(_:modelContext:)`, private `persistCompletedWalk` on completion.
+- `RandomWalker/RoutingService.swift` — `RoutedStep.maneuverCoordinate`, `routeWalkingLoop`, `routeWalkingResume`.
+- `RandomWalker/WalkSessionViewModel.swift` — `planHourLoop`, `startNavigation(seedLocation:)`, `discardNavigationWithoutSaving`, `stopAndSaveToHistory`, `replanFromCurrentLocation`, `ingestNavigationLocation(_:modelContext:)`, private `persistWalk`.
 - `RandomWalker/ContentView.swift` — guidance card, Start / Stop, location-driven ingest with `modelContext`, alert, `WalkMapCard` navigation bindings.
 - `RandomWalker/WalkHistoryView.swift` — browse saved `WalkRecord`s.
 

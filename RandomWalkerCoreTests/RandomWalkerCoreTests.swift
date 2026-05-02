@@ -90,6 +90,40 @@ final class PolylineCodecTests: XCTestCase {
     }
 }
 
+final class RoutedWalkNavigationProgressTests: XCTestCase {
+    func testNextVisitIndexWithinFirstLeg() {
+        XCTAssertEqual(
+            RoutedWalkNavigationProgress.nextVisitSequenceIndex(flattenedStepIndex: 0, legStepCounts: [4, 3, 2]),
+            1
+        )
+        XCTAssertEqual(
+            RoutedWalkNavigationProgress.nextVisitSequenceIndex(flattenedStepIndex: 3, legStepCounts: [4, 3, 2]),
+            1
+        )
+    }
+
+    func testNextVisitIndexCrossesIntoLaterLeg() {
+        XCTAssertEqual(
+            RoutedWalkNavigationProgress.nextVisitSequenceIndex(flattenedStepIndex: 4, legStepCounts: [4, 3, 2]),
+            2
+        )
+        XCTAssertEqual(
+            RoutedWalkNavigationProgress.nextVisitSequenceIndex(flattenedStepIndex: 6, legStepCounts: [4, 3, 2]),
+            2
+        )
+        XCTAssertEqual(
+            RoutedWalkNavigationProgress.nextVisitSequenceIndex(flattenedStepIndex: 7, legStepCounts: [4, 3, 2]),
+            3
+        )
+    }
+
+    func testNextVisitIndexPastStepsReturnsNil() {
+        XCTAssertNil(
+            RoutedWalkNavigationProgress.nextVisitSequenceIndex(flattenedStepIndex: 9, legStepCounts: [4, 3, 2])
+        )
+    }
+}
+
 final class ActiveWalkSnapshotTests: XCTestCase {
     func testJSONRoundTrip() throws {
         let snapshot = ActiveWalkSnapshot(

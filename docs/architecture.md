@@ -17,7 +17,7 @@ Keep **MapKit-specific** types out of the core framework where possible (for exa
 
 ## In-app guidance and history
 
-After planning, **Start** runs turn-by-turn navigation ([in-app-navigation.md](in-app-navigation.md)). When the user **completes** the last step, a **`WalkRecord`** is persisted (GPS **trace** when enough samples exist; otherwise planned polyline as fallback). Details: [history-and-persistence.md](history-and-persistence.md).
+After planning, **Start** runs turn-by-turn navigation ([in-app-navigation.md](in-app-navigation.md)). A **`WalkRecord`** is written when guidance **finishes all steps**, when the walker **returns near the start** after venturing out, or when they **save on stop**; otherwise **Discard** clears the trace. Stored path prefers the GPS **trace** when enough samples exist. Details: [history-and-persistence.md](history-and-persistence.md).
 
 ## Related docs
 

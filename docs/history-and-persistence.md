@@ -5,13 +5,25 @@
 | Action | SwiftData |
 |--------|-----------|
 | **Plan** succeeds (`planHourLoop`) | **No** `WalkRecord`. The route exists only in session state + watch payload. |
-| **Start** → walk → **last step** completes | **Yes** — one `WalkRecord` is inserted. |
-| **Stop guidance** (before completion) | **No** — recorded GPS trace is discarded. |
+| **Start** → walk → **last step** completes | **Yes** — `WalkRecord` with completion **Guided loop completed**. |
+| **Start** → after walking **≥ ~90 m** from the start point, dwell **≥ ~10 s** within **~40 m** of that start | **Yes** — **Returned to start** (same GPS trace / fallback rules as below). |
+| **Stop guidance** → **Save to history** | **Yes** — **Saved when stopped** (incomplete guidance allowed). |
+| **Stop guidance** → **Discard** | **No** — trace discarded. |
 | **Clear map** | Clears the active session and watch context only; **does not** delete existing history rows. |
+
+In **History**, swipe left on a row and tap **Delete** to remove that `WalkRecord`.
+
+## Completion labels (`WalkRecord`)
+
+Stored as `completionKindRaw` (legacy rows treat `nil` as guided complete):
+
+- **Guided loop completed** — every turn-by-turn maneuver advanced to the end.
+- **Returned to start** — automatic save after venturing out and coming back to the session start.
+- **Saved when stopped** — user chose **Save to history** from the stop confirmation.
 
 ## What gets stored
 
-- **`WalkRecord`** holds the loop that was **actually finished** after **Start**, not every planned variant the user browses before walking.
+- **`WalkRecord`** holds what you walked after **Start** for one of the save paths above, not every planned variant you browse before walking.
 - **Polyline**: Prefer the **GPS trace** sampled during navigation (~every **8 m**). If there are fewer than **two** recorded points, the app stores the **planned** route polyline instead (fallback when fixes are sparse).
 - **Distance** (`routedDistanceMeters`): Length along the stored polyline (trace length, or planned distance in the fallback case). Field name is legacy; value reflects **actual walk** when the trace is used.
 - **Duration** (`routedExpectedDurationSeconds`): **Wall-clock** time from **Start** to completion. Name is legacy.
@@ -21,8 +33,8 @@
 ## Code touchpoints
 
 - `RandomWalker/WalkRecord.swift` — SwiftData model.
-- `RandomWalker/WalkHistoryView.swift` — list + detail map.
-- `RandomWalker/WalkSessionViewModel.swift` — `planHourLoop` (no history write), `ingestNavigationLocation` → `persistCompletedWalk` on completion.
+- `RandomWalker/WalkHistoryView.swift` — list (swipe to delete) + detail map.
+- `RandomWalker/WalkSessionViewModel.swift` — `planHourLoop` (no history write), `ingestNavigationLocation` (guided complete + return-to-start), `stopAndSaveToHistory`, `RoutingService.routeWalkingResume` for replan (no history by itself).
 
 ## Related
 

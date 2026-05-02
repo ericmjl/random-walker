@@ -4,7 +4,7 @@
 
 - **One-tap hour loops**: The user gets a walking route of roughly **one hour** that **returns to the start**, with **minimal choices** (no manual waypoint picking).
 - **Variety**: Stops and geometry come from a **seeded random blueprint** (`RandomWalkGenerator`); MapKit supplies real **walking directions** stitched into a closed loop.
-- **Review past walks**: Walks appear in **History** only after the user **starts** guidance (**Start**) and **finishes** the loop—not for every route the app plans. That keeps history aligned with **walks actually completed** (see [history-and-persistence.md](history-and-persistence.md)).
+- **Review past walks**: History rows are created only after **Start**, when the user **finishes** turn-by-turn guidance, **returns near their start** after walking out, or **saves on stop**—not for every planned route. See [history-and-persistence.md](history-and-persistence.md).
 
 ## Platform principles
 
