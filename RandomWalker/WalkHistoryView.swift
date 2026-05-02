@@ -13,7 +13,7 @@ struct WalkHistoryView: View {
                     ContentUnavailableView(
                         "No walks yet",
                         systemImage: "figure.walk",
-                        description: Text("Plan your first hour loop from the Plan tab.")
+                        description: Text("Plan a loop, tap Start, and finish the guided route to save it here.")
                     )
                 } else {
                     List {

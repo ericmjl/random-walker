@@ -8,16 +8,16 @@
 
 Keep **MapKit-specific** types out of the core framework where possible (for example snapshot types like `RoutedStep` on the app side instead of storing `MKRoute.Step` in shared structs).
 
-## Data flow (planning a walk)
+## Planning flow (`planHourLoop`)
 
 1. User grants location → blueprint centered on `GeodesicWaypoint` from current coordinates (see [map-and-location.md](map-and-location.md)).
 2. `RoutingService` walks each blueprint leg with `MKDirections` (walking only) and merges polylines and step hints.
 3. `WalkSessionViewModel` may **retry** with scaled radius so routed duration falls in an acceptable band around one hour.
-4. A `WalkRecord` is stored in SwiftData; an `ActiveWalkSnapshot` is sent to the watch when connectivity allows.
+4. On success, `refinedWalk` / `activeBlueprint` are set and **`ActiveWalkSnapshot`** is sent to the watch via `PhoneConnectivityManager`. **No** `WalkRecord` is written at this stage.
 
-## In-app guidance
+## In-app guidance and history
 
-After planning, the user can tap **Start** for **turn-by-turn style** instructions driven by the same MapKit step text and maneuver points (see [in-app-navigation.md](in-app-navigation.md)).
+After planning, **Start** runs turn-by-turn navigation ([in-app-navigation.md](in-app-navigation.md)). When the user **completes** the last step, a **`WalkRecord`** is persisted (GPS **trace** when enough samples exist; otherwise planned polyline as fallback). Details: [history-and-persistence.md](history-and-persistence.md).
 
 ## Related docs
 

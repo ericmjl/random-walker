@@ -20,14 +20,18 @@ final class WalkSessionViewModel {
 
     private var routeNavigator: WalkRouteNavigator?
 
+    @ObservationIgnored
+    private var recordedNavigationPath: [CLLocationCoordinate2D] = []
+    @ObservationIgnored
+    private var navigationStartedAt: Date?
+
     private let targetDuration: TimeInterval = 3_600
     private let durationToleranceLower: Double = 0.72
     private let durationToleranceUpper: Double = 1.38
     private let maxAttempts = 8
 
-    func planAndPersistHourLoop(
+    func planHourLoop(
         around center: GeodesicWaypoint,
-        modelContext: ModelContext,
         connectivity: PhoneConnectivityManager
     ) async {
         guard !isPlanning else { return }
@@ -54,11 +58,6 @@ final class WalkSessionViewModel {
                 let ratio = routed.expectedTravelTime / targetDuration
 
                 if ratio.isFinite && ratio >= durationToleranceLower && ratio <= durationToleranceUpper {
-                    persist(
-                        routed: routed,
-                        blueprint: blueprint,
-                        modelContext: modelContext
-                    )
                     refinedWalk = routed
                     activeBlueprint = blueprint
                     refinementSummary = "Matched your hour window on attempt \(attempt + 1)."
@@ -91,10 +90,15 @@ final class WalkSessionViewModel {
         routeNavigator?.steps.count ?? 0
     }
 
-    func startNavigation() {
+    func startNavigation(seedLocation: CLLocation?) {
         guard let walk = refinedWalk else { return }
         let steps = WalkRouteNavigator.flattenedSteps(from: walk)
         guard !steps.isEmpty else { return }
+        recordedNavigationPath = []
+        navigationStartedAt = .now
+        if let coord = seedLocation?.coordinate {
+            recordedNavigationPath.append(coord)
+        }
         routeNavigator = WalkRouteNavigator(steps: steps)
         navigationCompletionNotice = nil
         isNavigating = true
@@ -104,20 +108,35 @@ final class WalkSessionViewModel {
         isNavigating = false
         routeNavigator = nil
         navigationCompletionNotice = nil
+        recordedNavigationPath = []
+        navigationStartedAt = nil
     }
 
     func acknowledgeNavigationCompletion() {
         navigationCompletionNotice = nil
         routeNavigator = nil
+        recordedNavigationPath = []
+        navigationStartedAt = nil
     }
 
-    func ingestNavigationLocation(_ location: CLLocation) {
+    func ingestNavigationLocation(_ location: CLLocation, modelContext: ModelContext) {
         guard isNavigating, var navigator = routeNavigator else { return }
+        appendRecordedSample(location.coordinate)
         navigator.ingest(userLocation: location)
         routeNavigator = navigator
         if navigator.isComplete {
             isNavigating = false
-            navigationCompletionNotice = "You finished the loop."
+            routeNavigator = nil
+            if let routed = refinedWalk, let blueprint = activeBlueprint {
+                persistCompletedWalk(
+                    routed: routed,
+                    blueprint: blueprint,
+                    modelContext: modelContext
+                )
+            }
+            navigationCompletionNotice = "You finished the loop. Saved to History."
+            recordedNavigationPath = []
+            navigationStartedAt = nil
         }
     }
 
@@ -141,27 +160,45 @@ final class WalkSessionViewModel {
         routeNavigator?.currentStep?.maneuverCoordinate
     }
 
-    func clearActiveWalk(connectivity: PhoneConnectivityManager) {
-        stopNavigation()
-        refinedWalk = nil
-        activeBlueprint = nil
-        connectivity.clearWalkOnWatch()
+    private func appendRecordedSample(_ coordinate: CLLocationCoordinate2D) {
+        if let last = recordedNavigationPath.last {
+            let previous = CLLocation(latitude: last.latitude, longitude: last.longitude)
+            let next = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            guard previous.distance(from: next) >= WalkSessionViewModel.recordedSampleMinSeparationMeters else {
+                return
+            }
+        }
+        recordedNavigationPath.append(coordinate)
     }
 
-    private func persist(
+    private static let recordedSampleMinSeparationMeters: CLLocationDistance = 8
+
+    /// Writes history only after a **completed** Start session (not after planning).
+    private func persistCompletedWalk(
         routed: RoutedWalk,
         blueprint: LoopWalkBlueprint,
         modelContext: ModelContext
     ) {
-        let points = routed.coordinates.map(GeodesicWaypoint.init(_:))
+        let pathCoordinates: [CLLocationCoordinate2D]
+        let distanceMeters: CLLocationDistance
+        if recordedNavigationPath.count >= 2 {
+            pathCoordinates = recordedNavigationPath
+            distanceMeters = Self.pathLengthMeters(recordedNavigationPath)
+        } else {
+            pathCoordinates = routed.coordinates
+            distanceMeters = routed.distanceMeters
+        }
+
+        let elapsedSeconds = navigationStartedAt.map { Date().timeIntervalSince($0) } ?? routed.expectedTravelTime
+        let points = pathCoordinates.map(GeodesicWaypoint.init(_:))
         let encoded = PolylineCodec.encode(coordinates: points)
 
         let titleDate = DateFormatter.walkTitle.string(from: .now)
         let record = WalkRecord(
-            id: routed.id,
+            id: UUID(),
             targetDurationSeconds: targetDuration,
-            routedDistanceMeters: routed.distanceMeters,
-            routedExpectedDurationSeconds: routed.expectedTravelTime,
+            routedDistanceMeters: distanceMeters,
+            routedExpectedDurationSeconds: max(1, elapsedSeconds),
             encodedPolyline: encoded,
             blueprintSalt: blueprint.randomSalt,
             centerLatitude: blueprint.center.latitude,
@@ -171,6 +208,30 @@ final class WalkSessionViewModel {
 
         modelContext.insert(record)
         try? modelContext.save()
+    }
+
+    private static func pathLengthMeters(_ coordinates: [CLLocationCoordinate2D]) -> CLLocationDistance {
+        guard coordinates.count >= 2 else { return 0 }
+        var total: CLLocationDistance = 0
+        for index in 1 ..< coordinates.count {
+            let a = CLLocation(
+                latitude: coordinates[index - 1].latitude,
+                longitude: coordinates[index - 1].longitude
+            )
+            let b = CLLocation(
+                latitude: coordinates[index].latitude,
+                longitude: coordinates[index].longitude
+            )
+            total += a.distance(from: b)
+        }
+        return total
+    }
+
+    func clearActiveWalk(connectivity: PhoneConnectivityManager) {
+        stopNavigation()
+        refinedWalk = nil
+        activeBlueprint = nil
+        connectivity.clearWalkOnWatch()
     }
 }
 

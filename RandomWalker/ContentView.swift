@@ -80,7 +80,7 @@ struct PlanWalkView: View {
                         .buttonStyle(.bordered)
                     } else {
                         Button {
-                            session.startNavigation()
+                            session.startNavigation(seedLocation: locationService.lastLocation)
                         } label: {
                             Label("Start", systemImage: "location.north.line.fill")
                                 .frame(maxWidth: .infinity)
@@ -110,7 +110,7 @@ struct PlanWalkView: View {
             .navigationTitle("Random Walker")
             .onChange(of: locationService.lastLocation) { _, newValue in
                 guard let newValue, session.isNavigating else { return }
-                session.ingestNavigationLocation(newValue)
+                session.ingestNavigationLocation(newValue, modelContext: modelContext)
             }
             .alert(
                 "Walk complete",
@@ -271,9 +271,8 @@ struct PlanWalkView: View {
             guard let coordinate = await locationService.coordinateForWalkStart() else { return }
 
             let waypoint = GeodesicWaypoint(coordinate)
-            await session.planAndPersistHourLoop(
+            await session.planHourLoop(
                 around: waypoint,
-                modelContext: modelContext,
                 connectivity: connectivity
             )
         }
