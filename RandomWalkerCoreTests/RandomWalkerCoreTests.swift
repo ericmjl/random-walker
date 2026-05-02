@@ -63,6 +63,46 @@ final class RandomWalkGeneratorTests: XCTestCase {
     }
 }
 
+final class RewalkProximityTests: XCTestCase {
+    func testFoldedOutAndBackScoresHigherThanOpenArc() {
+        var folded: [GeodesicWaypoint] = []
+        let base = GeodesicWaypoint(latitude: 40.0, longitude: -74.0)
+        for k in 0 ..< 9 {
+            folded.append(
+                GeodesicWaypoint(latitude: 40.0 + 0.000_15 * Double(k), longitude: -74.0 + 0.000_05 * Double(k))
+            )
+        }
+        for k in (0 ..< 9).reversed() {
+            folded.append(
+                GeodesicWaypoint(latitude: 40.0 + 0.000_15 * Double(k), longitude: -74.0 + 0.000_05 * Double(k))
+            )
+        }
+
+        var arc: [GeodesicWaypoint] = [base]
+        for k in 1 ..< 16 {
+            let t = Double(k) / 15
+            arc.append(
+                GeodesicWaypoint(
+                    latitude: 40.0 + 0.002 * sin(t * .pi),
+                    longitude: -74.0 + 0.002 * cos(t * .pi)
+                )
+            )
+        }
+
+        let foldedDebt = RewalkProximity.debtMeters(polyline: folded)
+        let arcDebt = RewalkProximity.debtMeters(polyline: arc)
+        XCTAssertGreaterThan(foldedDebt, arcDebt, "Backtracking along the same corridor should cost more than a spreading arc.")
+    }
+
+    func testShortPolylineHasZeroDebt() {
+        let pts = [
+            GeodesicWaypoint(latitude: 1, longitude: 2),
+            GeodesicWaypoint(latitude: 1.001, longitude: 2),
+        ]
+        XCTAssertEqual(RewalkProximity.debtMeters(polyline: pts), 0, accuracy: 0.001)
+    }
+}
+
 final class PolylineCodecTests: XCTestCase {
     func testRoundTripPreservesCoordinates() {
         let original = [

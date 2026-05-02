@@ -31,6 +31,7 @@
 		B1A2A32D88B46904C7B0157D /* RandomWalkerCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 14286431A4DBFAF150F79FD8 /* RandomWalkerCore.framework */; };
 		BAACF3EB28456A6BD3798A07 /* RandomWalkerCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 14286431A4DBFAF150F79FD8 /* RandomWalkerCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		BF9C928DA5C827FF08FCA8B6 /* RandomWalkerWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FFF02AF5AD67572B72DF357 /* RandomWalkerWatchApp.swift */; };
+		C563C31A21B8124A093888EF /* RewalkProximity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A42D8598202D579DE852AE3 /* RewalkProximity.swift */; };
 		D1DFC1AF184BE72A1EA213DC /* RandomWalkerCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CF3BA0EE634B9A5402C29E3 /* RandomWalkerCoreTests.swift */; };
 		D4D7E6CB8CE8227514D912BC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5EC4284FC51E61AA9171C491 /* Assets.xcassets */; };
 		D913EED7F7B8482479338BBE /* LoopWalkBlueprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3637185EA5C18AE30A1EC2F /* LoopWalkBlueprint.swift */; };
@@ -119,6 +120,7 @@
 		55D9389BF676625FA9C6DD43 /* RandomWalkerWatchRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RandomWalkerWatchRootView.swift; sourceTree = "<group>"; };
 		5EC4284FC51E61AA9171C491 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		66472E99C981AE5B7ABF6E82 /* RandomWalkerCoreTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = RandomWalkerCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		6A42D8598202D579DE852AE3 /* RewalkProximity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewalkProximity.swift; sourceTree = "<group>"; };
 		706E219E4A0BD23F2E61EE39 /* LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationService.swift; sourceTree = "<group>"; };
 		7B122355C44A449FEBC5A60D /* RoutingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutingService.swift; sourceTree = "<group>"; };
 		844AD4997E98C2B1C6129D8A /* RoutedWalk+Watch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RoutedWalk+Watch.swift"; sourceTree = "<group>"; };
@@ -214,6 +216,7 @@
 				34FE01F5EFEA6349F42E8436 /* PolylineCodec.swift */,
 				CD6C99EE8F4C05549B3E67CD /* RandomWalkGenerator.swift */,
 				B4D0F163327A72A1D8B17798 /* RandomWalkRNG.swift */,
+				6A42D8598202D579DE852AE3 /* RewalkProximity.swift */,
 				89038560C363AB71F9D1FA03 /* RoutedWalkNavigationProgress.swift */,
 			);
 			path = RandomWalkerCore;
@@ -374,6 +377,7 @@
 				6951F0B2AF3B2D173B58B184 /* PolylineCodec.swift in Sources */,
 				488B9DBDF7E94E471206E2F4 /* RandomWalkGenerator.swift in Sources */,
 				EB207979B8F82E72F62C8DA0 /* RandomWalkRNG.swift in Sources */,
+				C563C31A21B8124A093888EF /* RewalkProximity.swift in Sources */,
 				35AB95C152EE104019C291AD /* RoutedWalkNavigationProgress.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

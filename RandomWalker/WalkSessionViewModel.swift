@@ -47,6 +47,15 @@ final class WalkSessionViewModel {
     private let lengthToleranceUpper: Double = 1.38
     private let maxAttempts = 8
 
+    /// In-range routes are ranked by lower **re-walk** debt first, then closeness to the exact length target.
+    private struct LoopPlanCandidate {
+        let routed: RoutedWalk
+        let blueprint: LoopWalkBlueprint
+        let ratioGap: Double
+        let rewalkDebt: Double
+        let attempt: Int
+    }
+
     private static let returnToStartRadiusMeters: CLLocationDistance = 40
     private static let returnToStartDwellSeconds: TimeInterval = 10
     private static let ventureOutMinMeters: CLLocationDistance = 90
@@ -61,6 +70,8 @@ final class WalkSessionViewModel {
 
         let configuration = RandomWalkGenerator.Configuration(lengthGoal: planningLengthGoal)
         var radiusScale = 1.0
+        var best: LoopPlanCandidate?
+        var inBandCount = 0
 
         for attempt in 0 ..< maxAttempts {
             var rng = SplitMix64RNG(seed: UInt64.random(in: .min ... .max))
@@ -77,13 +88,20 @@ final class WalkSessionViewModel {
                 let ratio = routedMetric / targetMetric
 
                 if ratio.isFinite && ratio >= lengthToleranceLower && ratio <= lengthToleranceUpper {
-                    refinedWalk = routed
-                    activeBlueprint = blueprint
-                    refinementSummary = refinementSuccessSummary(attempt: attempt + 1)
-                    connectivity.sendActiveWalk(
-                        routed.makeWatchSnapshot(startedAt: .now, navigationSessionId: nil, recordingStartedAt: nil)
+                    let polyline = routed.coordinates.map(GeodesicWaypoint.init(_:))
+                    let debt = RewalkProximity.debtMeters(polyline: polyline)
+                    let ratioGap = abs(1.0 - ratio)
+                    let candidate = LoopPlanCandidate(
+                        routed: routed,
+                        blueprint: blueprint,
+                        ratioGap: ratioGap,
+                        rewalkDebt: debt,
+                        attempt: attempt + 1
                     )
-                    return
+                    inBandCount += 1
+                    if best == nil || prefersNewLoopCandidate(candidate, over: best!) {
+                        best = candidate
+                    }
                 }
 
                 let routedFloor: Double = switch planningLengthGoal {
@@ -104,9 +122,28 @@ final class WalkSessionViewModel {
             }
         }
 
+        if let pick = best {
+            refinedWalk = pick.routed
+            activeBlueprint = pick.blueprint
+            refinementSummary = refinementSuccessSummary(pick: pick, inBandCount: inBandCount)
+            connectivity.sendActiveWalk(
+                pick.routed.makeWatchSnapshot(startedAt: .now, navigationSessionId: nil, recordingStartedAt: nil)
+            )
+            return
+        }
+
         planningError = planningFailureMessage
         refinedWalk = nil
         activeBlueprint = nil
+    }
+
+    /// Prefer lower self-overlap debt, then closeness to the nominal target ratio.
+    private func prefersNewLoopCandidate(_ next: LoopPlanCandidate, over previous: LoopPlanCandidate) -> Bool {
+        let debtEps = max(25, previous.routed.distanceMeters * 0.002)
+        if abs(next.rewalkDebt - previous.rewalkDebt) > debtEps {
+            return next.rewalkDebt < previous.rewalkDebt
+        }
+        return next.ratioGap < previous.ratioGap
     }
 
     private func planningTargetMetrics(using goal: WalkLengthGoal, routed: RoutedWalk) -> (Double, Double) {
@@ -118,17 +155,23 @@ final class WalkSessionViewModel {
         }
     }
 
-    private func refinementSuccessSummary(attempt: Int) -> String {
+    private func refinementSuccessSummary(pick: LoopPlanCandidate, inBandCount: Int) -> String {
+        let base: String
         switch planningLengthGoal {
         case .duration(let seconds):
             let minutes = Int(seconds / 60)
-            return "Matched your \(minutes) min target on attempt \(attempt)."
+            base = "Matched your \(minutes) min target on attempt \(pick.attempt)."
         case .distance(let meters):
             if meters >= 1_000 {
-                return String(format: "Matched your %.1f km target on attempt %d.", meters / 1_000, attempt)
+                base = String(format: "Matched your %.1f km target on attempt %d.", meters / 1_000, pick.attempt)
+            } else {
+                base = "Matched your \(Int(meters)) m target on attempt \(pick.attempt)."
             }
-            return "Matched your \(Int(meters)) m target on attempt \(attempt)."
         }
+        if inBandCount > 1 {
+            return base + " Picked the least backtracking route among \(inBandCount) in-range options."
+        }
+        return base
     }
 
     private var planningFailureMessage: String {
