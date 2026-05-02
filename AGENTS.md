@@ -13,6 +13,7 @@ When adding new developer-facing pages, update `docs/index.md` so the table of c
 After changing **user-visible or data behavior**, update the relevant docs in the **same change-set**:
 
 - Planning / retries / `planLoop` → [docs/architecture.md](docs/architecture.md)
+- Walking pace (HealthKit, learned saves, **simulator fixtures**, `WalkingPaceService`) → [docs/walking-pace.md](docs/walking-pace.md)
 - History, `WalkRecord`, when rows are created, completion labels → [docs/history-and-persistence.md](docs/history-and-persistence.md)
 - **Start** / **Stop** / return-to-start / replan / steps / GPS trace / completion → [docs/in-app-navigation.md](docs/in-app-navigation.md)
 - Map camera, zoom, location permissions → [docs/map-and-location.md](docs/map-and-location.md)

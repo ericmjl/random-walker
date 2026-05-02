@@ -44,6 +44,82 @@ struct RoutedLeg: Sendable {
 }
 
 enum RoutingService {
+    /// Backoff between `MKDirections.calculate()` attempts (ms). First value should be `0` (immediate try).
+    private static let directionsRetryDelaysMs: [UInt64] = [0, 280, 600]
+
+    /// Asks MapKit for **walking** routes (including alternates when available) with retries for transient failures.
+    private static func walkingRoutes(
+        from source: CLLocationCoordinate2D,
+        to destination: CLLocationCoordinate2D
+    ) async throws -> [MKRoute] {
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: source))
+        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
+        request.transportType = .walking
+        request.requestsAlternateRoutes = true
+
+        var lastMessage: String?
+        for (index, delayMs) in directionsRetryDelaysMs.enumerated() {
+            if index > 0 {
+                try await Task.sleep(nanoseconds: delayMs * 1_000_000)
+            }
+            do {
+                let response = try await MKDirections(request: request).calculate()
+                var routes = response.routes.filter { $0.polyline.pointCount > 0 }
+                guard !routes.isEmpty else {
+                    lastMessage = RoutingServiceError.emptyRoute.errorDescription
+                    continue
+                }
+                if routes.count > 1 {
+                    routes.sort { $0.distance > $1.distance }
+                }
+                return routes
+            } catch {
+                lastMessage = error.localizedDescription
+            }
+        }
+        throw RoutingServiceError.directionsFailed(lastMessage)
+    }
+
+    private static func mergeWalkingRouteSegment(
+        route: MKRoute,
+        destination: CLLocationCoordinate2D,
+        coordinates: inout [CLLocationCoordinate2D],
+        legs: inout [RoutedLeg],
+        totalDistance: inout CLLocationDistance,
+        totalDuration: inout TimeInterval
+    ) {
+        let coords = route.polyline.toCoordinates()
+        if coordinates.isEmpty {
+            coordinates.append(contentsOf: coords)
+        } else if let first = coords.first, let last = coordinates.last, last.isNearlyEqual(to: first) {
+            coordinates.append(contentsOf: coords.dropFirst())
+        } else {
+            coordinates.append(contentsOf: coords.dropFirst())
+        }
+
+        totalDistance += route.distance
+        totalDuration += route.expectedTravelTime
+        let legDistance = route.distance
+        let legDuration = route.expectedTravelTime
+        let routedSteps = route.steps.map { step in
+            let stepDuration: TimeInterval
+            if legDistance > 0 {
+                stepDuration = legDuration * (step.distance / legDistance)
+            } else {
+                stepDuration = 0
+            }
+            let maneuverCoordinate = step.polyline.lastCoordinate(fallback: destination)
+            return RoutedStep(
+                instructions: step.instructions,
+                distance: step.distance,
+                expectedTravelTime: stepDuration,
+                maneuverCoordinate: maneuverCoordinate
+            )
+        }
+        legs.append(RoutedLeg(steps: routedSteps, distance: route.distance, expectedTravelTime: route.expectedTravelTime))
+    }
+
     /// Fuses walking directions between each stop in the blueprint, including the return to center.
     static func routeWalkingLoop(
         blueprint: LoopWalkBlueprint
@@ -62,52 +138,15 @@ enum RoutingService {
         for index in 0 ..< (stops.count - 1) {
             let source = stops[index].coordinate
             let destination = stops[index + 1].coordinate
-            let request = MKDirections.Request()
-            request.source = MKMapItem(placemark: MKPlacemark(coordinate: source))
-            request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
-            request.transportType = .walking
-            request.requestsAlternateRoutes = false
-
-            let calculator = MKDirections(request: request)
-            let response: MKDirections.Response
-            do {
-                response = try await calculator.calculate()
-            } catch {
-                throw RoutingServiceError.directionsFailed(error.localizedDescription)
-            }
-            guard let route = response.routes.first else {
-                throw RoutingServiceError.emptyRoute
-            }
-
-            let coords = route.polyline.toCoordinates()
-            if coordinates.isEmpty {
-                coordinates.append(contentsOf: coords)
-            } else if let first = coords.first, let last = coordinates.last, last.isNearlyEqual(to: first) {
-                coordinates.append(contentsOf: coords.dropFirst())
-            } else {
-                coordinates.append(contentsOf: coords.dropFirst())
-            }
-
-            totalDistance += route.distance
-            totalDuration += route.expectedTravelTime
-            let legDistance = route.distance
-            let legDuration = route.expectedTravelTime
-            let routedSteps = route.steps.map { step in
-                let stepDuration: TimeInterval
-                if legDistance > 0 {
-                    stepDuration = legDuration * (step.distance / legDistance)
-                } else {
-                    stepDuration = 0
-                }
-                let maneuverCoordinate = step.polyline.lastCoordinate(fallback: destination)
-                return RoutedStep(
-                    instructions: step.instructions,
-                    distance: step.distance,
-                    expectedTravelTime: stepDuration,
-                    maneuverCoordinate: maneuverCoordinate
-                )
-            }
-            legs.append(RoutedLeg(steps: routedSteps, distance: route.distance, expectedTravelTime: route.expectedTravelTime))
+            let routes = try await walkingRoutes(from: source, to: destination)
+            mergeWalkingRouteSegment(
+                route: routes[0],
+                destination: destination,
+                coordinates: &coordinates,
+                legs: &legs,
+                totalDistance: &totalDistance,
+                totalDuration: &totalDuration
+            )
         }
 
         return RoutedWalk(
@@ -147,52 +186,15 @@ enum RoutingService {
         for index in 0 ..< (chain.count - 1) {
             let source = chain[index]
             let destination = chain[index + 1]
-            let request = MKDirections.Request()
-            request.source = MKMapItem(placemark: MKPlacemark(coordinate: source))
-            request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
-            request.transportType = .walking
-            request.requestsAlternateRoutes = false
-
-            let calculator = MKDirections(request: request)
-            let response: MKDirections.Response
-            do {
-                response = try await calculator.calculate()
-            } catch {
-                throw RoutingServiceError.directionsFailed(error.localizedDescription)
-            }
-            guard let route = response.routes.first else {
-                throw RoutingServiceError.emptyRoute
-            }
-
-            let coords = route.polyline.toCoordinates()
-            if coordinates.isEmpty {
-                coordinates.append(contentsOf: coords)
-            } else if let first = coords.first, let last = coordinates.last, last.isNearlyEqual(to: first) {
-                coordinates.append(contentsOf: coords.dropFirst())
-            } else {
-                coordinates.append(contentsOf: coords.dropFirst())
-            }
-
-            totalDistance += route.distance
-            totalDuration += route.expectedTravelTime
-            let legDistance = route.distance
-            let legDuration = route.expectedTravelTime
-            let routedSteps = route.steps.map { step in
-                let stepDuration: TimeInterval
-                if legDistance > 0 {
-                    stepDuration = legDuration * (step.distance / legDistance)
-                } else {
-                    stepDuration = 0
-                }
-                let maneuverCoordinate = step.polyline.lastCoordinate(fallback: destination)
-                return RoutedStep(
-                    instructions: step.instructions,
-                    distance: step.distance,
-                    expectedTravelTime: stepDuration,
-                    maneuverCoordinate: maneuverCoordinate
-                )
-            }
-            legs.append(RoutedLeg(steps: routedSteps, distance: route.distance, expectedTravelTime: route.expectedTravelTime))
+            let routes = try await walkingRoutes(from: source, to: destination)
+            mergeWalkingRouteSegment(
+                route: routes[0],
+                destination: destination,
+                coordinates: &coordinates,
+                legs: &legs,
+                totalDistance: &totalDistance,
+                totalDuration: &totalDuration
+            )
         }
 
         return RoutedWalk(

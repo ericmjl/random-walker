@@ -40,8 +40,15 @@ final class WalkSessionViewModel {
     @ObservationIgnored
     private var mergedWatchTrack: WatchRecordedTrack?
 
-    /// User-chosen target for the next ``planLoop(around:connectivity:)`` (Plan sheet).
+    /// Pace used for **duration** goals and user-facing ETAs (`distance / pace`), aligned with ``planLoop(around:connectivity:walkingSpeedMetersPerSecond:)``.
+    @ObservationIgnored
+    private var planningPaceMetersPerSecond: Double = RandomWalkGenerator.defaultWalkingSpeedMetersPerSecond
+
+    /// User-chosen target for the next ``planLoop(around:connectivity:walkingSpeedMetersPerSecond:)`` (Plan sheet).
     var planningLengthGoal: WalkLengthGoal = .duration(3_600)
+
+    /// After a walk is saved, receives observed `(distanceMeters, durationSeconds)` for pace learning.
+    var onWalkSavedObservedPace: ((Double, Double) -> Void)?
 
     private let lengthToleranceLower: Double = 0.72
     private let lengthToleranceUpper: Double = 1.38
@@ -60,18 +67,28 @@ final class WalkSessionViewModel {
     private static let returnToStartDwellSeconds: TimeInterval = 10
     private static let ventureOutMinMeters: CLLocationDistance = 90
 
-    func planLoop(around center: GeodesicWaypoint, connectivity: PhoneConnectivityManager) async {
+    func planLoop(
+        around center: GeodesicWaypoint,
+        connectivity: PhoneConnectivityManager,
+        walkingSpeedMetersPerSecond: Double
+    ) async {
         guard !isPlanning else { return }
         discardNavigationWithoutSaving(connectivity: connectivity)
         isPlanning = true
         planningError = nil
         refinementSummary = nil
+        planningPaceMetersPerSecond = max(0.5, walkingSpeedMetersPerSecond)
         defer { isPlanning = false }
 
-        let configuration = RandomWalkGenerator.Configuration(lengthGoal: planningLengthGoal)
+        let configuration = RandomWalkGenerator.Configuration(
+            lengthGoal: planningLengthGoal,
+            walkingSpeedMetersPerSecond: walkingSpeedMetersPerSecond
+        )
         var radiusScale = 1.0
         var best: LoopPlanCandidate?
+        var bestNearMiss: LoopPlanCandidate?
         var inBandCount = 0
+        var lastRoutingError: String?
 
         for attempt in 0 ..< maxAttempts {
             var rng = SplitMix64RNG(seed: UInt64.random(in: .min ... .max))
@@ -102,6 +119,20 @@ final class WalkSessionViewModel {
                     if best == nil || prefersNewLoopCandidate(candidate, over: best!) {
                         best = candidate
                     }
+                } else if ratio.isFinite {
+                    let polyline = routed.coordinates.map(GeodesicWaypoint.init(_:))
+                    let debt = RewalkProximity.debtMeters(polyline: polyline)
+                    let ratioGap = abs(1.0 - ratio)
+                    let candidate = LoopPlanCandidate(
+                        routed: routed,
+                        blueprint: blueprint,
+                        ratioGap: ratioGap,
+                        rewalkDebt: debt,
+                        attempt: attempt + 1
+                    )
+                    if bestNearMiss == nil || prefersNewLoopCandidate(candidate, over: bestNearMiss!) {
+                        bestNearMiss = candidate
+                    }
                 }
 
                 let routedFloor: Double = switch planningLengthGoal {
@@ -113,12 +144,11 @@ final class WalkSessionViewModel {
                 let adjustedScale = radiusScale * (targetMetric / max(routedMetric, routedFloor))
                 radiusScale = min(2.8, max(0.35, adjustedScale))
                 refinementSummary =
-                    "Adjusting route (attempt \(attempt + 1)): about \(Int(routed.expectedTravelTime / 60)) min • \(Int(routed.distanceMeters)) m from Maps."
+                    "Adjusting route (attempt \(attempt + 1)): about \(paceBasedWalkMinutes(routed: routed)) min at your pace • \(Int(routed.distanceMeters)) m."
             } catch {
-                planningError = error.localizedDescription
-                refinedWalk = nil
-                activeBlueprint = nil
-                return
+                lastRoutingError = error.localizedDescription
+                refinementSummary =
+                    "Maps did not return walking directions for layout \(attempt + 1). Trying another shape…"
             }
         }
 
@@ -132,7 +162,23 @@ final class WalkSessionViewModel {
             return
         }
 
-        planningError = planningFailureMessage
+        if let pick = bestNearMiss {
+            refinedWalk = pick.routed
+            activeBlueprint = pick.blueprint
+            refinementSummary = refinementNearMissSummary(pick: pick)
+            planningError = nil
+            connectivity.sendActiveWalk(
+                pick.routed.makeWatchSnapshot(startedAt: .now, navigationSessionId: nil, recordingStartedAt: nil)
+            )
+            return
+        }
+
+        if let err = lastRoutingError {
+            planningError =
+                "Could not get a complete walking loop from Maps after \(maxAttempts) tries. \(err) Try moving slightly or changing your time/distance."
+        } else {
+            planningError = planningFailureMessage
+        }
         refinedWalk = nil
         activeBlueprint = nil
     }
@@ -147,12 +193,17 @@ final class WalkSessionViewModel {
     }
 
     private func planningTargetMetrics(using goal: WalkLengthGoal, routed: RoutedWalk) -> (Double, Double) {
+        let speed = planningPaceMetersPerSecond
         switch goal {
         case .duration(let seconds):
-            (seconds, routed.expectedTravelTime)
+            return (Double(seconds), routed.distanceMeters / speed)
         case .distance(let meters):
-            (meters, routed.distanceMeters)
+            return (meters, routed.distanceMeters)
         }
+    }
+
+    private func paceBasedWalkMinutes(routed: RoutedWalk) -> Int {
+        max(1, Int(round(routed.distanceMeters / planningPaceMetersPerSecond / 60)))
     }
 
     private func refinementSuccessSummary(pick: LoopPlanCandidate, inBandCount: Int) -> String {
@@ -172,6 +223,15 @@ final class WalkSessionViewModel {
             return base + " Picked the least backtracking route among \(inBandCount) in-range options."
         }
         return base
+    }
+
+    private func refinementNearMissSummary(pick: LoopPlanCandidate) -> String {
+        let (targetMetric, routedMetric) = planningTargetMetrics(using: planningLengthGoal, routed: pick.routed)
+        let pct = max(1, min(999, Int(round(100 * routedMetric / max(targetMetric, 1)))))
+        let mins = paceBasedWalkMinutes(routed: pick.routed)
+        let meters = Int(pick.routed.distanceMeters)
+        return
+            "Could not match your target within the usual range — showing the closest loop we could route (~\(mins) min at your pace • \(meters) m, about \(pct)% of your goal, attempt \(pick.attempt))."
     }
 
     private var planningFailureMessage: String {
@@ -516,6 +576,7 @@ final class WalkSessionViewModel {
 
         modelContext.insert(record)
         try? modelContext.save()
+        onWalkSavedObservedPace?(distanceMeters, elapsedSeconds)
     }
 
     private static func pathLengthMeters(_ coordinates: [CLLocationCoordinate2D]) -> CLLocationDistance {

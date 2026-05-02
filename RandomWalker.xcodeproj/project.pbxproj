@@ -23,6 +23,7 @@
 		6FD9EBD2EED2CD36061C0D6C /* RoutingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B122355C44A449FEBC5A60D /* RoutingService.swift */; };
 		721C0466AA1D64ADE0D6B7CD /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5EC677855DCB943578493B7 /* ContentView.swift */; };
 		7CBF23C0A31EE357FC83F09F /* PhoneConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0003FCD87AFB260126858D0 /* PhoneConnectivityManager.swift */; };
+		80844ECB756A8D51A8802373 /* WalkingPaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EA0A927F795FA108A01B1A6 /* WalkingPaceService.swift */; };
 		871BEF093E27885F6D0A275C /* RandomWalkerWatchRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55D9389BF676625FA9C6DD43 /* RandomWalkerWatchRootView.swift */; };
 		92D686F776F0C33518DA933D /* WatchWalkCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C44869965EBE4CF09A32999A /* WatchWalkCoordinator.swift */; };
 		AC091F77ACD772F0405F075B /* WalkSessionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 268AEAF759192ABC4F3C690E /* WalkSessionViewModel.swift */; };
@@ -105,6 +106,7 @@
 		0CC8CA031DACA7DE83C9C9DC /* RandomWalker.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RandomWalker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		14286431A4DBFAF150F79FD8 /* RandomWalkerCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = RandomWalkerCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		18BF2356A49770EA5E9F3AB9 /* RoutedWalk+Navigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RoutedWalk+Navigation.swift"; sourceTree = "<group>"; };
+		1EA0A927F795FA108A01B1A6 /* WalkingPaceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkingPaceService.swift; sourceTree = "<group>"; };
 		2440AB9740E102F608A49516 /* WalkHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkHistoryView.swift; sourceTree = "<group>"; };
 		25739C5E2FE009D2B4390635 /* RandomWalker.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = RandomWalker.entitlements; sourceTree = "<group>"; };
 		268AEAF759192ABC4F3C690E /* WalkSessionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkSessionViewModel.swift; sourceTree = "<group>"; };
@@ -178,6 +180,7 @@
 				844AD4997E98C2B1C6129D8A /* RoutedWalk+Watch.swift */,
 				7B122355C44A449FEBC5A60D /* RoutingService.swift */,
 				2440AB9740E102F608A49516 /* WalkHistoryView.swift */,
+				1EA0A927F795FA108A01B1A6 /* WalkingPaceService.swift */,
 				899BB645866245C5182302E2 /* WalkRecord.swift */,
 				4580E31B6BF4169957AA503F /* WalkRouteNavigator.swift */,
 				268AEAF759192ABC4F3C690E /* WalkSessionViewModel.swift */,
@@ -416,6 +419,7 @@
 				6FD581890842258BEC317BEF /* WalkRecord.swift in Sources */,
 				ACE970D4408E20DAFDC73482 /* WalkRouteNavigator.swift in Sources */,
 				AC091F77ACD772F0405F075B /* WalkSessionViewModel.swift in Sources */,
+				80844ECB756A8D51A8802373 /* WalkingPaceService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

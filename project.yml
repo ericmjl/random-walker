@@ -38,6 +38,8 @@ targets:
       GENERATE_INFOPLIST_FILE: YES
     entitlements:
       path: RandomWalker/RandomWalker.entitlements
+      properties:
+        com.apple.developer.healthkit: true
     scheme:
       testTargets:
         - RandomWalkerCoreTests

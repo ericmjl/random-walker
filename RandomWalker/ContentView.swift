@@ -9,6 +9,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var locationService = LocationService()
     @StateObject private var connectivity = PhoneConnectivityManager()
+    @StateObject private var walkingPace = WalkingPaceService()
     @State private var session = WalkSessionViewModel()
 
     var body: some View {
@@ -16,6 +17,7 @@ struct ContentView: View {
             PlanWalkView(
                 locationService: locationService,
                 connectivity: connectivity,
+                walkingPace: walkingPace,
                 session: session
             )
             .tabItem {
@@ -27,7 +29,17 @@ struct ContentView: View {
                     Label("History", systemImage: "clock.arrow.circlepath")
                 }
         }
+        .onAppear {
+            session.onWalkSavedObservedPace = { distanceMeters, durationSeconds in
+                walkingPace.ingestObservedWalk(distanceMeters: distanceMeters, durationSeconds: durationSeconds)
+            }
+        }
         .task {
+            walkingPace.bootstrapFromHistoryIfNeeded(modelContext: modelContext)
+            await walkingPace.refreshAuthorizedHealthKitData()
+            #if targetEnvironment(simulator)
+            await walkingPace.seedSimulatorWalkingSpeedFixtures()
+            #endif
             locationService.requestWhenInUse()
             locationService.startUpdates()
         }
@@ -44,6 +56,7 @@ struct PlanWalkView: View {
     @Environment(\.openURL) private var openURL
     @ObservedObject var locationService: LocationService
     @ObservedObject var connectivity: PhoneConnectivityManager
+    @ObservedObject var walkingPace: WalkingPaceService
     @Bindable var session: WalkSessionViewModel
     @State private var isResolvingLocation = false
     @State private var showStopGuidanceConfirmation = false
@@ -54,6 +67,7 @@ struct PlanWalkView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     locationPermissionCallout
+                    walkingPaceCallout
 
                     WalkMapCard(
                         coordinates: session.refinedWalk?.coordinates ?? [],
@@ -95,7 +109,10 @@ struct PlanWalkView: View {
                 }
             }
             .sheet(isPresented: $showNewRouteSheet) {
-                NewRoutePlanningSheet(lengthGoal: $session.planningLengthGoal) {
+                NewRoutePlanningSheet(
+                    lengthGoal: $session.planningLengthGoal,
+                    walkingSpeedMetersPerSecond: walkingPace.effectiveWalkingSpeedMetersPerSecond
+                ) {
                     Task {
                         await startPlanningAfterSheet()
                     }
@@ -347,9 +364,11 @@ struct PlanWalkView: View {
             }
 
             if let walk = session.refinedWalk {
+                let paceMetersPerSecond = max(0.5, walkingPace.effectiveWalkingSpeedMetersPerSecond)
+                let paceMinutes = max(1, Int(round(walk.distanceMeters / paceMetersPerSecond / 60)))
                 Text(
                     """
-                    About \(Int(walk.expectedTravelTime / 60)) min • \
+                    About \(paceMinutes) min at your pace • \
                     \(Int(walk.distanceMeters)) m • Apple Watch route when paired
                     """
                 )
@@ -390,7 +409,58 @@ struct PlanWalkView: View {
         guard let coordinate = await locationService.coordinateForWalkStart() else { return }
 
         let waypoint = GeodesicWaypoint(coordinate)
-        await session.planLoop(around: waypoint, connectivity: connectivity)
+        await session.planLoop(
+            around: waypoint,
+            connectivity: connectivity,
+            walkingSpeedMetersPerSecond: walkingPace.effectiveWalkingSpeedMetersPerSecond
+        )
+    }
+
+    @ViewBuilder
+    private var walkingPaceCallout: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Your walking pace")
+                .font(.headline)
+            Text(walkingPace.paceDetail)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            if walkingPace.healthKitLinkButtonVisible() {
+                Button("Use Apple Health walking speed") {
+                    Task {
+                        await walkingPace.linkAppleHealthWalkingSpeed()
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+            if walkingPace.healthAccessDenied() {
+                Button("Open Settings — enable Health access") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        openURL(url)
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+            #if targetEnvironment(simulator)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Simulator: sample Health data")
+                    .font(.subheadline.weight(.semibold))
+                Text("Grants Health access and saves walking-speed samples (~1.4–1.7 m/s) over recent virtual days so pacing uses Apple Health like a device.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Write sample walking speeds again") {
+                    Task {
+                        await walkingPace.seedSimulatorWalkingSpeedFixtures(force: true)
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(.top, 4)
+            #endif
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 

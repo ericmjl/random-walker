@@ -1,6 +1,6 @@
 # In-app navigation (turn-by-turn)
 
-After a loop is **planned** (`planHourLoop`), **Start** begins guidance modeled on Apple Maps walking directions (simplified, in-app only—not opening the Maps app).
+After a loop is **planned** (`planLoop`), **Start** begins guidance modeled on Apple Maps walking directions (simplified, in-app only—not opening the Maps app).
 
 ## Behavior
 
@@ -17,7 +17,7 @@ After a loop is **planned** (`planHourLoop`), **Start** begins guidance modeled 
 
 - `RandomWalker/WalkRouteNavigator.swift` — step list, `ingest`, bearing helper.
 - `RandomWalker/RoutingService.swift` — `RoutedStep.maneuverCoordinate`, `routeWalkingLoop`, `routeWalkingResume`.
-- `RandomWalker/WalkSessionViewModel.swift` — `planHourLoop`, `startNavigation(seedLocation:connectivity:)`, `discardNavigationWithoutSaving(connectivity:)`, `stopAndSaveToHistory`, `replanFromCurrentLocation`, `ingestNavigationLocation`, `ingestWatchRecording`, private `persistWalk`.
+- `RandomWalker/WalkSessionViewModel.swift` — `planLoop(around:connectivity:walkingSpeedMetersPerSecond:)`, `startNavigation(seedLocation:connectivity:)`, `discardNavigationWithoutSaving(connectivity:)`, `stopAndSaveToHistory`, `replanFromCurrentLocation`, `ingestNavigationLocation`, `ingestWatchRecording`, private `persistWalk`, `onWalkSavedObservedPace` (pace learning).
 - `RandomWalker/PhoneConnectivityManager.swift` — `sendActiveWalk`, `requestWatchRecording`, `clearWalkOnWatch`, `onWatchRecordedTrack`.
 - `RandomWalkerWatch/WatchWalkCoordinator.swift` — receives snapshots, records GPS, replies with `WatchRecordedTrack`.
 - `RandomWalker/ContentView.swift` — guidance card, Start / Stop, location-driven ingest with `modelContext`, alert, `WalkMapCard` navigation bindings.
@@ -27,3 +27,7 @@ After a loop is **planned** (`planHourLoop`), **Start** begins guidance modeled 
 ## XcodeGen
 
 New Swift files under `RandomWalker/` are picked up the next time you run `xcodegen generate`.
+
+## Related
+
+- [walking-pace.md](walking-pace.md) — saved walks feed `WalkingPaceService` via `onWalkSavedObservedPace`.

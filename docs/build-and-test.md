@@ -21,4 +21,6 @@ Xcode does not run two schemes with one ⌘R. From the repo root, use:
 
 This picks a paired iPhone + Watch (defaults to the **iPhone 17** pair if present), boots both, runs `xcodegen generate`, builds **RandomWalker** and **RandomWalkerWatch**, installs them, and launches both apps. Override UDIDs with `RANDOM_WALKER_PHONE_UDID` and `RANDOM_WALKER_WATCH_UDID`, or run `./scripts/run_ios_watch_sim_pair.py --list-pairs` to see pairs.
 
+On the **iOS Simulator**, accept the Health permission when prompted if you want **walking-speed** sample data for [`WalkingPaceService`](walking-pace.md) (see **Simulator + Health** in that page).
+
 For where code should live and how to test it, see [code-conventions.md](code-conventions.md).

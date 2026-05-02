@@ -6,6 +6,10 @@
 	<string>Random Walker</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Random Walker needs your location to build walking loops that start and end where you are.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Random Walker reads your walking speed from Apple Health when you allow it, so planned distances better match how long you walk.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>On a simulator, Random Walker can save sample walking-speed data for testing. On a device, it does not write to Health.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

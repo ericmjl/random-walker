@@ -1,9 +1,11 @@
 import RandomWalkerCore
 import SwiftUI
 
-/// Sheet for choosing **time** or **distance** before ``WalkSessionViewModel/planLoop(around:connectivity:)``.
+/// Sheet for choosing **time** or **distance** before ``WalkSessionViewModel/planLoop(around:connectivity:walkingSpeedMetersPerSecond:)``.
 struct NewRoutePlanningSheet: View {
     @Binding var lengthGoal: WalkLengthGoal
+    /// Pace used when converting between time and distance in the segmented control (typically ``WalkingPaceService/effectiveWalkingSpeedMetersPerSecond``).
+    var walkingSpeedMetersPerSecond: Double
     /// Called after the sheet dismisses with ``lengthGoal`` already updated.
     var onBuild: () -> Void
 
@@ -90,11 +92,11 @@ struct NewRoutePlanningSheet: View {
                 if nowTime {
                     let derived =
                         (distanceKilometers * 1_000)
-                            / (RandomWalkGenerator.defaultWalkingSpeedMetersPerSecond * 60)
+                            / (walkingSpeedMetersPerSecond * 60)
                     minutes = derived.clamped(to: Self.minutesRange)
                 } else {
                     let derivedKm =
-                        (minutes * 60 * RandomWalkGenerator.defaultWalkingSpeedMetersPerSecond) / 1_000
+                        (minutes * 60 * walkingSpeedMetersPerSecond) / 1_000
                     distanceKilometers = derivedKm.clamped(to: Self.kilometersRange)
                 }
             }
@@ -143,5 +145,9 @@ private extension Double {
 }
 
 #Preview {
-    NewRoutePlanningSheet(lengthGoal: .constant(.duration(3_600)), onBuild: {})
+    NewRoutePlanningSheet(
+        lengthGoal: .constant(.duration(3_600)),
+        walkingSpeedMetersPerSecond: RandomWalkGenerator.defaultWalkingSpeedMetersPerSecond,
+        onBuild: {}
+    )
 }
