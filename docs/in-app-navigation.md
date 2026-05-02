@@ -11,14 +11,18 @@ After a loop is **planned** (`planHourLoop`), **Start** begins guidance modeled 
 - **Completion (guided)**: When the last step is satisfied, guidance stops, a **`WalkRecord`** is written (`guidedComplete`), and an alert confirms.
 - **Return-to-start**: After **Start**, if GPS moves **about 90 m** or farther from the start coordinate, then stays within **about 40 m** of that start for **about 10 s**, a **`WalkRecord`** is saved (`returnedToStart`) and guidance ends.
 - **History saves**: Same trace rules as before (~**8 m** sampling; ≥2 points → trace polyline, else planned route fallback). **Save to history** on stop uses `savedOnStop`. **Discard** on stop does not save. Planning alone never creates a row. See [history-and-persistence.md](history-and-persistence.md).
+- **Apple Watch**: After **Plan**, the phone pushes turn cues in `ActiveWalkSnapshot` (no `navigationSessionId`). After **Start**, the phone pushes again with `navigationSessionId` + `recordingStartedAt`; the watch runs **CoreLocation** (~8 m, aligned with the phone) and can show **Recording path for iPhone**. When the session ends, the phone requests a `WatchRecordedTrack` flush (`requestRecordingFlush` + reply when reachable, else the watch may use `transferUserInfo`). History **prefers** ≥2 watch samples for the stored polyline and watch wall time when merging succeeds.
 
 ## Code touchpoints
 
 - `RandomWalker/WalkRouteNavigator.swift` — step list, `ingest`, bearing helper.
 - `RandomWalker/RoutingService.swift` — `RoutedStep.maneuverCoordinate`, `routeWalkingLoop`, `routeWalkingResume`.
-- `RandomWalker/WalkSessionViewModel.swift` — `planHourLoop`, `startNavigation(seedLocation:)`, `discardNavigationWithoutSaving`, `stopAndSaveToHistory`, `replanFromCurrentLocation`, `ingestNavigationLocation(_:modelContext:)`, private `persistWalk`.
+- `RandomWalker/WalkSessionViewModel.swift` — `planHourLoop`, `startNavigation(seedLocation:connectivity:)`, `discardNavigationWithoutSaving(connectivity:)`, `stopAndSaveToHistory`, `replanFromCurrentLocation`, `ingestNavigationLocation`, `ingestWatchRecording`, private `persistWalk`.
+- `RandomWalker/PhoneConnectivityManager.swift` — `sendActiveWalk`, `requestWatchRecording`, `clearWalkOnWatch`, `onWatchRecordedTrack`.
+- `RandomWalkerWatch/WatchWalkCoordinator.swift` — receives snapshots, records GPS, replies with `WatchRecordedTrack`.
 - `RandomWalker/ContentView.swift` — guidance card, Start / Stop, location-driven ingest with `modelContext`, alert, `WalkMapCard` navigation bindings.
 - `RandomWalker/WalkHistoryView.swift` — browse saved `WalkRecord`s.
+- `RandomWalkerCore/ActiveWalkSnapshot.swift` — `WatchRecordedTrack`, `WatchMessageKey`.
 
 ## XcodeGen
 

@@ -24,7 +24,7 @@ Stored as `completionKindRaw` (legacy rows treat `nil` as guided complete):
 ## What gets stored
 
 - **`WalkRecord`** holds what you walked after **Start** for one of the save paths above, not every planned variant you browse before walking.
-- **Polyline**: Prefer the **GPS trace** sampled during navigation (~every **8 m**). If there are fewer than **two** recorded points, the app stores the **planned** route polyline instead (fallback when fixes are sparse).
+- **Polyline**: Prefer the **GPS trace** sampled during navigation (~every **8 m**). If there are fewer than **two** recorded points, the app stores the **planned** route polyline instead (fallback when fixes are sparse). When Apple Watch recorded the same **navigation session** with at least two samples, History uses the **watch** path and the watch’s **startedAt–endedAt** duration for that row.
 - **Distance** (`routedDistanceMeters`): Length along the stored polyline (trace length, or planned distance in the fallback case). Field name is legacy; value reflects **actual walk** when the trace is used.
 - **Duration** (`routedExpectedDurationSeconds`): **Wall-clock** time from **Start** to completion. Name is legacy.
 - **`targetDurationSeconds`**: Planning target (~1 hour), for context.

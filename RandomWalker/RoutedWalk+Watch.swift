@@ -6,7 +6,11 @@ extension RoutedWalk {
         static let maxHints = 96
     }
 
-    func makeWatchSnapshot(startedAt: Date) -> ActiveWalkSnapshot {
+    func makeWatchSnapshot(
+        startedAt: Date,
+        navigationSessionId: UUID? = nil,
+        recordingStartedAt: Date? = nil
+    ) -> ActiveWalkSnapshot {
         let hints = legs
             .flatMap(\.steps)
             .prefix(WatchExport.maxHints)
@@ -23,7 +27,9 @@ extension RoutedWalk {
             startedAt: startedAt,
             legs: hints,
             totalDistanceMeters: distanceMeters,
-            expectedDurationSeconds: expectedTravelTime
+            expectedDurationSeconds: expectedTravelTime,
+            navigationSessionId: navigationSessionId,
+            recordingStartedAt: recordingStartedAt
         )
     }
 

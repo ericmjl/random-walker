@@ -31,8 +31,7 @@ targets:
     dependencies:
       - target: RandomWalkerCore
       # Watch app is a separate target/scheme so iOS Simulator builds do not
-      # require a matching watchOS simulator runtime. For App Store builds
-      # that bundle the Watch app, add: `- target: RandomWalkerWatch` with `embed: true`.
+      # require a matching watchOS simulator runtime.
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: dev.ericmjl.randomwalker
       INFOPLIST_FILE: RandomWalker/Info.plist
@@ -50,10 +49,16 @@ targets:
       - path: RandomWalkerWatch
     dependencies:
       - target: RandomWalkerCore
+        embed: true
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: dev.ericmjl.randomwalker.watchkitapp
       INFOPLIST_FILE: RandomWalkerWatch/Info.plist
       GENERATE_INFOPLIST_FILE: YES
+      # Required so the Swift debug dylib can resolve @rpath-linked embedded frameworks.
+      LD_RUNPATH_SEARCH_PATHS:
+        - $(inherited)
+        - '@executable_path/Frameworks'
+        - '@loader_path/Frameworks'
 
   RandomWalkerCoreTests:
     type: bundle.unit-test

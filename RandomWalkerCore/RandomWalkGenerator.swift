@@ -1,19 +1,54 @@
 import CoreLocation
 import Foundation
 
+/// Whether planning targets an approximate **walk duration** or a **path length** (MapKit may refine either).
+@frozen
+public enum WalkLengthGoal: Sendable, Equatable {
+    case duration(TimeInterval)
+    case distance(meters: Double)
+}
+
 /// Builds irregular loop blueprints around a start coordinate without calling into MapKit.
 public enum RandomWalkGenerator {
-    /// Default brisk urban walking speed used to translate duration → rough loop length.
+    /// Default brisk urban walking speed used to translate duration ↔ rough loop length.
     public static let defaultWalkingSpeedMetersPerSecond: Double = 1.34 // ≈ 4.8 km/h
 
     public struct Configuration: Sendable, Equatable {
-        public var targetDuration: TimeInterval
+        /// Primary planning target; drives blueprint geometry.
+        public var lengthGoal: WalkLengthGoal
         public var walkingSpeedMetersPerSecond: Double
         public var minIntermediateStops: Int
         public var maxIntermediateStops: Int
         public var radiusJitter: ClosedRange<Double>
         public var angularJitterRadians: ClosedRange<Double>
 
+        /// Nominal duration stored on blueprints (for distance goals, derived from length ÷ speed).
+        public var nominalTargetDuration: TimeInterval {
+            switch lengthGoal {
+            case .duration(let t):
+                return t
+            case .distance(let meters):
+                return max(60, meters / max(0.25, walkingSpeedMetersPerSecond))
+            }
+        }
+
+        public init(
+            lengthGoal: WalkLengthGoal,
+            walkingSpeedMetersPerSecond: Double = RandomWalkGenerator.defaultWalkingSpeedMetersPerSecond,
+            minIntermediateStops: Int = 4,
+            maxIntermediateStops: Int = 7,
+            radiusJitter: ClosedRange<Double> = 0.82 ... 1.18,
+            angularJitterRadians: ClosedRange<Double> = (-0.55) ... 0.55
+        ) {
+            self.lengthGoal = lengthGoal
+            self.walkingSpeedMetersPerSecond = walkingSpeedMetersPerSecond
+            self.minIntermediateStops = minIntermediateStops
+            self.maxIntermediateStops = maxIntermediateStops
+            self.radiusJitter = radiusJitter
+            self.angularJitterRadians = angularJitterRadians
+        }
+
+        /// Convenience for duration-only planning (previous API surface).
         public init(
             targetDuration: TimeInterval,
             walkingSpeedMetersPerSecond: Double = RandomWalkGenerator.defaultWalkingSpeedMetersPerSecond,
@@ -22,18 +57,20 @@ public enum RandomWalkGenerator {
             radiusJitter: ClosedRange<Double> = 0.82 ... 1.18,
             angularJitterRadians: ClosedRange<Double> = (-0.55) ... 0.55
         ) {
-            self.targetDuration = targetDuration
-            self.walkingSpeedMetersPerSecond = walkingSpeedMetersPerSecond
-            self.minIntermediateStops = minIntermediateStops
-            self.maxIntermediateStops = maxIntermediateStops
-            self.radiusJitter = radiusJitter
-            self.angularJitterRadians = angularJitterRadians
+            self.init(
+                lengthGoal: .duration(targetDuration),
+                walkingSpeedMetersPerSecond: walkingSpeedMetersPerSecond,
+                minIntermediateStops: minIntermediateStops,
+                maxIntermediateStops: maxIntermediateStops,
+                radiusJitter: radiusJitter,
+                angularJitterRadians: angularJitterRadians
+            )
         }
     }
 
     /// - Parameters:
     ///   - center: The loop’s start/end coordinate.
-    ///   - configuration: Duration and variability controls.
+    ///   - configuration: Target walk length (time or distance) and variability controls.
     ///   - rng: Randomness source.
     ///   - radiusScale: Multiplier for the loop’s spatial extent (routing may refine duration).
     public static func makeBlueprint(
@@ -45,7 +82,13 @@ public enum RandomWalkGenerator {
         let salt = rng.nextUInt64()
         let stops = max(1, rng.intUniform(in: configuration.minIntermediateStops ... configuration.maxIntermediateStops))
 
-        let targetMeters = max(400, configuration.targetDuration * configuration.walkingSpeedMetersPerSecond)
+        let targetMeters: Double = switch configuration.lengthGoal {
+        case .duration(let t):
+            max(400, t * configuration.walkingSpeedMetersPerSecond)
+        case .distance(let meters):
+            max(400, meters)
+        }
+        let nominalDuration = configuration.nominalTargetDuration
         // Rough perimeter budget for an irregular polygon: scale radius from desired chord budget.
         let meanRadius = max(120, targetMeters / (2 * .pi * Double(stops) * 0.35)) * radiusScale
 
@@ -74,7 +117,7 @@ public enum RandomWalkGenerator {
         return LoopWalkBlueprint(
             center: center,
             intermediateWaypoints: scaled,
-            targetWalkingDuration: configuration.targetDuration,
+            targetWalkingDuration: nominalDuration,
             randomSalt: salt
         )
     }

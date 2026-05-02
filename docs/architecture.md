@@ -4,7 +4,7 @@
 
 - **RandomWalkerCore**: Pure domain and shared models—waypoints, blueprint generation, polyline encoding, watch payload types. Tested on macOS via `swift test`.
 - **RandomWalker (iOS)**: SwiftUI app shell, `RoutingService` (MapKit), `WalkSessionViewModel`, SwiftData `WalkRecord`, `LocationService`, `PhoneConnectivityManager`.
-- **RandomWalkerWatch**: Consumes messages/context from the phone and presents step hints.
+- **RandomWalkerWatch**: Consumes messages/context from the phone and presents step hints; records GPS during **Start** sessions and sends `WatchRecordedTrack` back.
 
 Keep **MapKit-specific** types out of the core framework where possible (for example snapshot types like `RoutedStep` on the app side instead of storing `MKRoute.Step` in shared structs).
 

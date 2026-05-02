@@ -35,6 +35,12 @@ final class RandomWalkGeneratorTests: XCTestCase {
         XCTAssertNotEqual(different.intermediateWaypoints, duplicate.intermediateWaypoints)
     }
 
+    func testDistanceGoalYieldsLongerNominalDurationThanShortWalk() {
+        let short = RandomWalkGenerator.Configuration(targetDuration: 600)
+        let long = RandomWalkGenerator.Configuration(lengthGoal: .distance(meters: 8_000))
+        XCTAssertGreaterThan(long.nominalTargetDuration, short.nominalTargetDuration)
+    }
+
     func testRadiusScaleChangesGeometryWithSameSeed() {
         let center = GeodesicWaypoint(latitude: 40.0, longitude: -74.0)
         var rngSmall = SplitMix64RNG(seed: 99)
@@ -141,5 +147,41 @@ final class ActiveWalkSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.routeId, snapshot.routeId)
         XCTAssertEqual(decoded.legs.count, 1)
         XCTAssertEqual(decoded.legs.first?.title, "Turn left")
+        XCTAssertNil(decoded.navigationSessionId)
+    }
+
+    func testSnapshotWithNavigationSessionRoundTrip() throws {
+        let sid = UUID()
+        let recStart = Date(timeIntervalSince1970: 1_800_000_000)
+        let snapshot = ActiveWalkSnapshot(
+            routeId: UUID(),
+            startedAt: .now,
+            legs: [],
+            totalDistanceMeters: 100,
+            expectedDurationSeconds: 60,
+            navigationSessionId: sid,
+            recordingStartedAt: recStart
+        )
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(ActiveWalkSnapshot.self, from: data)
+        XCTAssertEqual(decoded.navigationSessionId, sid)
+        XCTAssertEqual(decoded.recordingStartedAt, recStart)
+    }
+
+    func testWatchRecordedTrackJSONRoundTrip() throws {
+        let track = WatchRecordedTrack(
+            routeId: UUID(),
+            navigationSessionId: UUID(),
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            endedAt: Date(timeIntervalSince1970: 1_700_003_600),
+            samples: [
+                GeodesicWaypoint(latitude: 1, longitude: 2),
+                GeodesicWaypoint(latitude: 1.0001, longitude: 2.0001),
+            ]
+        )
+        let data = try JSONEncoder().encode(track)
+        let decoded = try JSONDecoder().decode(WatchRecordedTrack.self, from: data)
+        XCTAssertEqual(decoded.samples.count, 2)
+        XCTAssertEqual(decoded.samples[0].latitude, 1, accuracy: 0.000_001)
     }
 }

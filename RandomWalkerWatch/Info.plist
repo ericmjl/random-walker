@@ -8,5 +8,11 @@
 	<true/>
 	<key>WKCompanionAppBundleIdentifier</key>
 	<string>dev.ericmjl.randomwalker</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Random Walker records your walking path on Apple Watch and syncs it to your iPhone for History.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 </dict>
 </plist>

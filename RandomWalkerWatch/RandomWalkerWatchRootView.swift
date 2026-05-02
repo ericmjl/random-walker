@@ -7,7 +7,7 @@ struct RandomWalkerWatchRootView: View {
     var body: some View {
         NavigationStack {
             if let snapshot = coordinator.snapshot {
-                WatchRouteView(snapshot: snapshot)
+                WatchRouteView(snapshot: snapshot, isRecordingGPS: coordinator.isRecordingGPS)
             } else {
                 ContentUnavailableView(
                     "No active loop",
@@ -25,6 +25,7 @@ struct RandomWalkerWatchRootView: View {
 
 private struct WatchRouteView: View {
     let snapshot: ActiveWalkSnapshot
+    var isRecordingGPS: Bool
     @State private var index: Int = 0
 
     var body: some View {
@@ -36,6 +37,16 @@ private struct WatchRouteView: View {
                 Text("\(Int(snapshot.totalDistanceMeters)) m")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+            }
+
+            if isRecordingGPS {
+                HStack(spacing: 4) {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .foregroundStyle(.red)
+                    Text("Recording path for iPhone")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if snapshot.legs.isEmpty {

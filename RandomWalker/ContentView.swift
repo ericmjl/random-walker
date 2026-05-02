@@ -47,86 +47,72 @@ struct PlanWalkView: View {
     @Bindable var session: WalkSessionViewModel
     @State private var isResolvingLocation = false
     @State private var showStopGuidanceConfirmation = false
+    @State private var showNewRouteSheet = false
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                locationPermissionCallout
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    locationPermissionCallout
 
-                WalkMapCard(
-                    coordinates: session.refinedWalk?.coordinates ?? [],
-                    userCoordinate: locationService.lastLocation?.coordinate,
-                    isNavigating: session.isNavigating,
-                    userCourse: userCourseFromLocation,
-                    maneuverCoordinate: session.maneuverCoordinateForNavigation(),
-                    navigationStepIndex: session.navigationStepIndex
-                )
-                .frame(height: session.isNavigating ? 380 : 320)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    WalkMapCard(
+                        coordinates: session.refinedWalk?.coordinates ?? [],
+                        userCoordinate: locationService.lastLocation?.coordinate,
+                        isNavigating: session.isNavigating,
+                        userCourse: userCourseFromLocation,
+                        maneuverCoordinate: session.maneuverCoordinateForNavigation(),
+                        navigationStepIndex: session.navigationStepIndex
+                    )
+                    .frame(height: session.isNavigating ? 380 : 320)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
-                if session.isNavigating {
-                    navigationGuidanceCard
-                }
-
-                statusSection
-
-                if session.refinedWalk != nil {
                     if session.isNavigating {
-                        Button(role: .cancel) {
-                            showStopGuidanceConfirmation = true
-                        } label: {
-                            Label("Stop guidance", systemImage: "stop.circle")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .confirmationDialog(
-                            "Stop guidance?",
-                            isPresented: $showStopGuidanceConfirmation,
-                            titleVisibility: .visible
-                        ) {
-                            Button("Save to history") {
-                                session.stopAndSaveToHistory(modelContext: modelContext)
-                            }
-                            Button("Discard", role: .destructive) {
-                                session.discardNavigationWithoutSaving()
-                            }
-                            Button("Cancel", role: .cancel) {}
-                        } message: {
-                            Text("Save your GPS path so far, discard it, or keep navigating.")
+                        navigationGuidanceCard
+                    }
+
+                    statusSection
+
+                    if session.refinedWalk != nil {
+                        if session.isNavigating {
+                            stopGuidanceControl
+                        } else {
+                            routeReadyActions
                         }
                     } else {
-                        Button {
-                            session.startNavigation(seedLocation: locationService.lastLocation)
-                        } label: {
-                            Label("Start", systemImage: "location.north.line.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
+                        planRouteEntryButton
                     }
                 }
-
-                Button(action: startPlanning) {
-                    Label("Hour-long random loop", systemImage: "shuffle")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(session.isPlanning || isResolvingLocation || !locationService.canStartPlanning)
-
-                Button(role: .destructive) {
-                    session.clearActiveWalk(connectivity: connectivity)
-                } label: {
-                    Label("Clear map", systemImage: "xmark.circle")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-
-                Spacer()
+                .padding()
             }
-            .padding()
             .navigationTitle("Random Walker")
+            .toolbar {
+                if session.refinedWalk != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Clear map", systemImage: "xmark.circle") {
+                            session.clearActiveWalk(connectivity: connectivity)
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showNewRouteSheet) {
+                NewRoutePlanningSheet(lengthGoal: $session.planningLengthGoal) {
+                    Task {
+                        await startPlanningAfterSheet()
+                    }
+                }
+            }
             .onChange(of: locationService.lastLocation) { _, newValue in
                 guard let newValue, session.isNavigating else { return }
-                session.ingestNavigationLocation(newValue, modelContext: modelContext)
+                session.ingestNavigationLocation(
+                    newValue,
+                    modelContext: modelContext,
+                    connectivity: connectivity
+                )
+            }
+            .onAppear {
+                connectivity.onWatchRecordedTrack = { track in
+                    session.ingestWatchRecording(track)
+                }
             }
             .alert(
                 "Walk complete",
@@ -147,6 +133,101 @@ struct PlanWalkView: View {
     private var userCourseFromLocation: CLLocationDirection? {
         guard let course = locationService.lastLocation?.course, course >= 0 else { return nil }
         return course
+    }
+
+    @ViewBuilder
+    private var stopGuidanceControl: some View {
+        Button(role: .cancel) {
+            showStopGuidanceConfirmation = true
+        } label: {
+            Label("Stop guidance", systemImage: "stop.circle")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .confirmationDialog(
+            "Stop guidance?",
+            isPresented: $showStopGuidanceConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Save to history") {
+                Task {
+                    await session.stopAndSaveToHistory(
+                        modelContext: modelContext,
+                        connectivity: connectivity
+                    )
+                }
+            }
+            Button("Discard", role: .destructive) {
+                session.discardNavigationWithoutSaving(connectivity: connectivity)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Save your GPS path so far, discard it, or keep navigating.")
+        }
+    }
+
+    @ViewBuilder
+    private var routeReadyActions: some View {
+        VStack(spacing: 14) {
+            Button {
+                session.startNavigation(
+                    seedLocation: locationService.lastLocation,
+                    connectivity: connectivity
+                )
+            } label: {
+                Label("Start walk", systemImage: "figure.walk")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+            Button {
+                presentNewRouteSheetIfLocationReady()
+            } label: {
+                VStack(spacing: 6) {
+                    Label("New route", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.headline)
+                    Text("Set time or distance, then rebuild the loop")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(session.isPlanning || isResolvingLocation || !locationService.canStartPlanning)
+        }
+    }
+
+    @ViewBuilder
+    private var planRouteEntryButton: some View {
+        Button {
+            presentNewRouteSheetIfLocationReady()
+        } label: {
+            VStack(spacing: 6) {
+                Label("Plan a walking route", systemImage: "map")
+                    .font(.headline)
+                Text("Choose how long or how far, then build a random loop from here")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .disabled(session.isPlanning || isResolvingLocation || !locationService.canStartPlanning)
     }
 
     @ViewBuilder
@@ -268,8 +349,8 @@ struct PlanWalkView: View {
             if let walk = session.refinedWalk {
                 Text(
                     """
-                    About \(Int(walk.expectedTravelTime / 60)) minutes • \
-                    \(Int(walk.distanceMeters)) meters • Watch updated
+                    About \(Int(walk.expectedTravelTime / 60)) min • \
+                    \(Int(walk.distanceMeters)) m • Apple Watch route when paired
                     """
                 )
                 .font(.headline)
@@ -288,24 +369,28 @@ struct PlanWalkView: View {
         }
     }
 
-    private func startPlanning() {
+    private func presentNewRouteSheetIfLocationReady() {
+        if locationService.authorizationStatus == .notDetermined {
+            locationService.requestWhenInUse()
+            return
+        }
+        guard locationService.canStartPlanning else { return }
+        showNewRouteSheet = true
+    }
+
+    private func startPlanningAfterSheet() async {
         if locationService.authorizationStatus == .notDetermined {
             locationService.requestWhenInUse()
             return
         }
 
-        Task {
-            isResolvingLocation = true
-            defer { isResolvingLocation = false }
+        isResolvingLocation = true
+        defer { isResolvingLocation = false }
 
-            guard let coordinate = await locationService.coordinateForWalkStart() else { return }
+        guard let coordinate = await locationService.coordinateForWalkStart() else { return }
 
-            let waypoint = GeodesicWaypoint(coordinate)
-            await session.planHourLoop(
-                around: waypoint,
-                connectivity: connectivity
-            )
-        }
+        let waypoint = GeodesicWaypoint(coordinate)
+        await session.planLoop(around: waypoint, connectivity: connectivity)
     }
 }
 

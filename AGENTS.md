@@ -12,7 +12,7 @@ When adding new developer-facing pages, update `docs/index.md` so the table of c
 
 After changing **user-visible or data behavior**, update the relevant docs in the **same change-set**:
 
-- Planning / retries / `planHourLoop` → [docs/architecture.md](docs/architecture.md)
+- Planning / retries / `planLoop` → [docs/architecture.md](docs/architecture.md)
 - History, `WalkRecord`, when rows are created, completion labels → [docs/history-and-persistence.md](docs/history-and-persistence.md)
 - **Start** / **Stop** / return-to-start / replan / steps / GPS trace / completion → [docs/in-app-navigation.md](docs/in-app-navigation.md)
 - Map camera, zoom, location permissions → [docs/map-and-location.md](docs/map-and-location.md)
@@ -27,6 +27,22 @@ If no page fits, add a new **kebab-case** file under `docs/` and link it from `d
 - Follow [docs/code-conventions.md](docs/code-conventions.md) for where to place logic (Core vs app) and docstring style.
 - After editing `project.yml` or **adding new source files** under an XcodeGen-managed folder, run `xcodegen generate` before claiming the Xcode project is current.
 - **Always run a build** after you change implementation code (Swift, shared Core, or anything that affects compilation). Do not treat the work as done until the iOS target builds successfully using the flow in [docs/build-and-test.md](docs/build-and-test.md). Run `swift test` when you touch `RandomWalkerCore` or its tests.
+- **Rebuild and relaunch simulators (agents, required):** After **any** code change that affects the app, run the paired simulator launcher so builds are fresh **and** both apps are installed and launched—not only `xcodebuild` with no launch. From the repo root:
+
+  ```bash
+  ./scripts/run_ios_watch_sim_pair.py --skip-xcodegen
+  ```
+
+  Omit `--skip-xcodegen` if you edited `project.yml` or otherwise need to regenerate the Xcode project first. This script boots the paired iPhone + Watch simulators, builds **RandomWalker** and **RandomWalkerWatch**, installs them, and launches both bundle IDs (see [docs/build-and-test.md](docs/build-and-test.md)). Use it by default at the end of an implementation task unless the user explicitly asks not to touch simulators.
+- **Clean + build (CLI, required when needed)**: If a clean build is appropriate—**stale DerivedData**, asset or storyboard changes that are not picked up, linker or copy-bundle oddities, or any situation where you would tell someone to “Clean Build Folder” in Xcode—**you must run clean and then build yourself from the terminal**, not only describe those steps. Use the same project, scheme, and destination as normal builds:
+
+  ```bash
+  xcodegen generate   # when project.yml / XcodeGen inputs changed
+  xcodebuild -project RandomWalker.xcodeproj -scheme RandomWalker \
+    -destination "$(scripts/print_ios_sim_destination.py)" clean
+  xcodebuild -project RandomWalker.xcodeproj -scheme RandomWalker \
+    -destination "$(scripts/print_ios_sim_destination.py)" build
+  ```
 
 ## iOS Simulator (CLI and agents)
 
