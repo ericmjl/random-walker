@@ -101,6 +101,19 @@ final class RewalkProximityTests: XCTestCase {
         ]
         XCTAssertEqual(RewalkProximity.debtMeters(polyline: pts), 0, accuracy: 0.001)
     }
+
+    /// Regression: downsampling used to subscript `cumulative[count]` when the last sample target met or exceeded length due to FP rounding.
+    func testLongPolylineDownsampleProducesFiniteDebt() {
+        var pts: [GeodesicWaypoint] = []
+        for i in 0 ..< 200 {
+            pts.append(
+                GeodesicWaypoint(latitude: 40.0 + 0.000_1 * Double(i), longitude: -74.0)
+            )
+        }
+        let debt = RewalkProximity.debtMeters(polyline: pts, maxVertices: 48)
+        XCTAssertTrue(debt.isFinite)
+        XCTAssertGreaterThanOrEqual(debt, 0)
+    }
 }
 
 final class PolylineCodecTests: XCTestCase {

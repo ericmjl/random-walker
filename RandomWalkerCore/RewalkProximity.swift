@@ -70,13 +70,23 @@ public enum RewalkProximity {
 
         var result: [GeodesicWaypoint] = []
         result.reserveCapacity(vertexBudget)
+        let lastK = vertexBudget - 1
         for k in 0 ..< vertexBudget {
-            let target = total * Double(k) / Double(vertexBudget - 1)
+            let target: Double
+            if k == 0 {
+                target = 0
+            } else if k == lastK {
+                target = total
+            } else {
+                target = total * Double(k) / Double(lastK)
+            }
+
             var hi = 1
-            while hi < cumulative.count && cumulative[hi] < target {
+            while hi < cumulative.count, cumulative[hi] < target {
                 hi += 1
             }
-            let i = hi
+            // `hi` can equal cumulative.count when `target` is rounded up to `total` or from FP noise; clamp for subscripts.
+            let i = min(max(1, hi), cumulative.count - 1)
             let prevDist = cumulative[i - 1]
             let segLen = cumulative[i] - prevDist
             let t = segLen > 0 ? (target - prevDist) / segLen : 0

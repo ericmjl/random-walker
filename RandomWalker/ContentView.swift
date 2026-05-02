@@ -36,6 +36,7 @@ struct ContentView: View {
         }
         .task {
             walkingPace.bootstrapFromHistoryIfNeeded(modelContext: modelContext)
+            await walkingPace.requestWalkingSpeedReadAccessIfNeeded()
             await walkingPace.refreshAuthorizedHealthKitData()
             #if targetEnvironment(simulator)
             await walkingPace.seedSimulatorWalkingSpeedFixtures()
@@ -67,7 +68,6 @@ struct PlanWalkView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     locationPermissionCallout
-                    walkingPaceCallout
 
                     WalkMapCard(
                         coordinates: session.refinedWalk?.coordinates ?? [],
@@ -347,9 +347,6 @@ struct PlanWalkView: View {
             if let error = session.planningError {
                 Text(error)
                     .foregroundStyle(.red)
-            } else if let summary = session.refinementSummary {
-                Text(summary)
-                    .foregroundStyle(.secondary)
             } else {
                 Text(instructions)
                     .foregroundStyle(.secondary)
@@ -416,52 +413,6 @@ struct PlanWalkView: View {
         )
     }
 
-    @ViewBuilder
-    private var walkingPaceCallout: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Your walking pace")
-                .font(.headline)
-            Text(walkingPace.paceDetail)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            if walkingPace.healthKitLinkButtonVisible() {
-                Button("Use Apple Health walking speed") {
-                    Task {
-                        await walkingPace.linkAppleHealthWalkingSpeed()
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
-            if walkingPace.healthAccessDenied() {
-                Button("Open Settings — enable Health access") {
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        openURL(url)
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
-            #if targetEnvironment(simulator)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Simulator: sample Health data")
-                    .font(.subheadline.weight(.semibold))
-                Text("Grants Health access and saves walking-speed samples (~1.4–1.7 m/s) over recent virtual days so pacing uses Apple Health like a device.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button("Write sample walking speeds again") {
-                    Task {
-                        await walkingPace.seedSimulatorWalkingSpeedFixtures(force: true)
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding(.top, 4)
-            #endif
-        }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
 }
 
 private struct WalkMapCard: View {

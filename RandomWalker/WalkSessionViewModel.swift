@@ -11,7 +11,6 @@ final class WalkSessionViewModel {
     var planningError: String?
     var refinedWalk: RoutedWalk?
     var activeBlueprint: LoopWalkBlueprint?
-    var refinementSummary: String?
 
     /// True while the user is following on-phone guidance for `refinedWalk`.
     var isNavigating = false
@@ -76,7 +75,6 @@ final class WalkSessionViewModel {
         discardNavigationWithoutSaving(connectivity: connectivity)
         isPlanning = true
         planningError = nil
-        refinementSummary = nil
         planningPaceMetersPerSecond = max(0.5, walkingSpeedMetersPerSecond)
         defer { isPlanning = false }
 
@@ -143,19 +141,23 @@ final class WalkSessionViewModel {
                 }
                 let adjustedScale = radiusScale * (targetMetric / max(routedMetric, routedFloor))
                 radiusScale = min(2.8, max(0.35, adjustedScale))
-                refinementSummary =
-                    "Adjusting route (attempt \(attempt + 1)): about \(paceBasedWalkMinutes(routed: routed)) min at your pace • \(Int(routed.distanceMeters)) m."
+                RotatingFileLogger.shared.log(
+                    "planning",
+                    "Attempt \(attempt + 1): about \(paceBasedWalkMinutes(routed: routed)) min at user pace, \(Int(routed.distanceMeters)) m path."
+                )
             } catch {
                 lastRoutingError = error.localizedDescription
-                refinementSummary =
-                    "Maps did not return walking directions for layout \(attempt + 1). Trying another shape…"
+                RotatingFileLogger.shared.log(
+                    "planning",
+                    "Attempt \(attempt + 1): routing failed — \(error.localizedDescription)"
+                )
             }
         }
 
         if let pick = best {
             refinedWalk = pick.routed
             activeBlueprint = pick.blueprint
-            refinementSummary = refinementSuccessSummary(pick: pick, inBandCount: inBandCount)
+            RotatingFileLogger.shared.log("planning", refinementSuccessSummary(pick: pick, inBandCount: inBandCount))
             connectivity.sendActiveWalk(
                 pick.routed.makeWatchSnapshot(startedAt: .now, navigationSessionId: nil, recordingStartedAt: nil)
             )
@@ -165,8 +167,8 @@ final class WalkSessionViewModel {
         if let pick = bestNearMiss {
             refinedWalk = pick.routed
             activeBlueprint = pick.blueprint
-            refinementSummary = refinementNearMissSummary(pick: pick)
             planningError = nil
+            RotatingFileLogger.shared.log("planning", refinementNearMissSummary(pick: pick))
             connectivity.sendActiveWalk(
                 pick.routed.makeWatchSnapshot(startedAt: .now, navigationSessionId: nil, recordingStartedAt: nil)
             )
@@ -418,7 +420,7 @@ final class WalkSessionViewModel {
                     recordingStartedAt: navigationStartedAt
                 )
             )
-            refinementSummary = "Updated route from your position."
+            RotatingFileLogger.shared.log("planning", "Replan from current location succeeded.")
         } catch {
             planningError = error.localizedDescription
         }

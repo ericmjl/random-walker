@@ -47,6 +47,24 @@ enum RoutingService {
     /// Backoff between `MKDirections.calculate()` attempts (ms). First value should be `0` (immediate try).
     private static let directionsRetryDelaysMs: [UInt64] = [0, 280, 600]
 
+    private static func formatCoordinate(_ c: CLLocationCoordinate2D) -> String {
+        String(format: "%.6f,%.6f", c.latitude, c.longitude)
+    }
+
+    /// Logs the hop that failed before rethrowing (hypothesis: MapKit cannot walk between specific blueprint points).
+    private static func logLegFailure(operation: String, leg: Int, of legCount: Int, source: CLLocationCoordinate2D, destination: CLLocationCoordinate2D, error: Error) {
+        let message: String
+        if let routing = error as? RoutingServiceError {
+            message = routing.errorDescription ?? String(describing: routing)
+        } else {
+            message = error.localizedDescription
+        }
+        RotatingFileLogger.shared.log(
+            "routing",
+            "\(operation) leg \(leg)/\(legCount) \(formatCoordinate(source)) → \(formatCoordinate(destination)): \(message)"
+        )
+    }
+
     /// Asks MapKit for **walking** routes (including alternates when available) with retries for transient failures.
     private static func walkingRoutes(
         from source: CLLocationCoordinate2D,
@@ -134,19 +152,32 @@ enum RoutingService {
         var totalDistance: CLLocationDistance = 0
         var totalDuration: TimeInterval = 0
         let routeIdentifier = UUID()
+        let legCount = stops.count - 1
 
-        for index in 0 ..< (stops.count - 1) {
+        for index in 0 ..< legCount {
             let source = stops[index].coordinate
             let destination = stops[index + 1].coordinate
-            let routes = try await walkingRoutes(from: source, to: destination)
-            mergeWalkingRouteSegment(
-                route: routes[0],
-                destination: destination,
-                coordinates: &coordinates,
-                legs: &legs,
-                totalDistance: &totalDistance,
-                totalDuration: &totalDuration
-            )
+            do {
+                let routes = try await walkingRoutes(from: source, to: destination)
+                mergeWalkingRouteSegment(
+                    route: routes[0],
+                    destination: destination,
+                    coordinates: &coordinates,
+                    legs: &legs,
+                    totalDistance: &totalDistance,
+                    totalDuration: &totalDuration
+                )
+            } catch {
+                logLegFailure(
+                    operation: "routeWalkingLoop",
+                    leg: index + 1,
+                    of: legCount,
+                    source: source,
+                    destination: destination,
+                    error: error
+                )
+                throw error
+            }
         }
 
         return RoutedWalk(
@@ -182,19 +213,32 @@ enum RoutingService {
         var totalDistance: CLLocationDistance = 0
         var totalDuration: TimeInterval = 0
         let routeIdentifier = UUID()
+        let legCount = chain.count - 1
 
-        for index in 0 ..< (chain.count - 1) {
+        for index in 0 ..< legCount {
             let source = chain[index]
             let destination = chain[index + 1]
-            let routes = try await walkingRoutes(from: source, to: destination)
-            mergeWalkingRouteSegment(
-                route: routes[0],
-                destination: destination,
-                coordinates: &coordinates,
-                legs: &legs,
-                totalDistance: &totalDistance,
-                totalDuration: &totalDuration
-            )
+            do {
+                let routes = try await walkingRoutes(from: source, to: destination)
+                mergeWalkingRouteSegment(
+                    route: routes[0],
+                    destination: destination,
+                    coordinates: &coordinates,
+                    legs: &legs,
+                    totalDistance: &totalDistance,
+                    totalDuration: &totalDuration
+                )
+            } catch {
+                logLegFailure(
+                    operation: "routeWalkingResume(nextVisitIndex=\(nextVisitIndex))",
+                    leg: index + 1,
+                    of: legCount,
+                    source: source,
+                    destination: destination,
+                    error: error
+                )
+                throw error
+            }
         }
 
         return RoutedWalk(

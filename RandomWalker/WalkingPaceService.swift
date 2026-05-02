@@ -12,7 +12,6 @@ import SwiftData
 final class WalkingPaceService: ObservableObject {
     @Published private(set) var effectiveWalkingSpeedMetersPerSecond: Double = RandomWalkGenerator
         .defaultWalkingSpeedMetersPerSecond
-    @Published private(set) var paceDetail: String = ""
 
     private let healthStore = HKHealthStore()
     private var cachedHealthMedianPace: Double?
@@ -60,33 +59,26 @@ final class WalkingPaceService: ObservableObject {
         let sorted = paces.sorted()
         let median = sorted[sorted.count / 2]
         defaults.set(median, forKey: DefaultsKey.learnedEMA)
+        RotatingFileLogger.shared.log("pace", "Bootstrapped learned pace from history: median sample ≈ \(String(format: "%.2f", median)) m/s")
         recomputeEffective()
     }
 
-    /// User-facing action: request read access for walking speed and refresh the median.
-    func linkAppleHealthWalkingSpeed() async {
+    /// If walking-speed read access is still undetermined, requests it (system sheet). Safe to call on launch.
+    func requestWalkingSpeedReadAccessIfNeeded() async {
         guard HKHealthStore.isHealthDataAvailable(), let type = walkingSpeedQuantityType else {
-            paceDetail = "Health data isn’t available on this device."
+            RotatingFileLogger.shared.log("pace", "HealthKit not available.")
             return
         }
+        guard healthStore.authorizationStatus(for: type) == .notDetermined else { return }
         do {
             try await healthStore.requestAuthorization(toShare: [], read: [type])
             await refreshHealthKitWalkingSpeedMedian()
             recomputeEffective()
+            let after = healthStore.authorizationStatus(for: type)
+            RotatingFileLogger.shared.log("pace", "Walking-speed read authorization finished; status=\(String(describing: after)).")
         } catch {
-            paceDetail = "Could not read Health data (\(error.localizedDescription))."
+            RotatingFileLogger.shared.log("pace", "Walking-speed read authorization error: \(error.localizedDescription)")
         }
-    }
-
-    func healthKitLinkButtonVisible() -> Bool {
-        guard HKHealthStore.isHealthDataAvailable(), let type = walkingSpeedQuantityType else { return false }
-        let status = healthStore.authorizationStatus(for: type)
-        return status == .notDetermined
-    }
-
-    func healthAccessDenied() -> Bool {
-        guard let type = walkingSpeedQuantityType else { return false }
-        return healthStore.authorizationStatus(for: type) == .sharingDenied
     }
 
     private func refreshHealthKitWalkingSpeedMedian() async {
@@ -155,10 +147,7 @@ final class WalkingPaceService: ObservableObject {
                 )
         case let (l?, nil):
             merged = l
-            blurb = String(
-                format: "From your saved walks (about %.1f km/h). Tap below to add Apple Health.",
-                merged * 3.6
-            )
+            blurb = String(format: "Pace from saved walks (about %.1f km/h).", merged * 3.6)
         case let (nil, h?):
             merged = h
             blurb = String(
@@ -172,8 +161,14 @@ final class WalkingPaceService: ObservableObject {
                 merged * 3.6
             )
         }
-        effectiveWalkingSpeedMetersPerSecond = min(max(merged, Self.paceClamp.lowerBound), Self.paceClamp.upperBound)
-        paceDetail = blurb
+        let newSpeed = min(max(merged, Self.paceClamp.lowerBound), Self.paceClamp.upperBound)
+        if abs(newSpeed - effectiveWalkingSpeedMetersPerSecond) > 0.000_1 {
+            RotatingFileLogger.shared.log(
+                "pace",
+                "\(blurb) effectiveWalkingSpeedMetersPerSecond=\(String(format: "%.3f", newSpeed))"
+            )
+        }
+        effectiveWalkingSpeedMetersPerSecond = newSpeed
     }
 
     /// Re-fetches HealthKit median if already authorized (e.g. when returning to the app).
@@ -194,14 +189,14 @@ extension WalkingPaceService {
         static let didSeed = "randomwalker.debug.simulatorWalkingSpeedSeeded"
     }
 
-    /// Writes walking-speed samples into the **simulator** Health database so ``linkAppleHealthWalkingSpeed()`` and normal reads see realistic data.
+    /// Writes walking-speed samples into the **simulator** Health database for development testing.
     ///
     /// Requests read **and** write access for walking speed. When `force` is false, sample insertion runs once per install unless you call again with `force: true`.
     ///
     /// - Parameter force: When true, saves another batch even if this install already seeded once.
     func seedSimulatorWalkingSpeedFixtures(force: Bool = false) async {
         guard HKHealthStore.isHealthDataAvailable(), let type = walkingSpeedQuantityType else {
-            paceDetail = "Health data isn’t available on this simulator."
+            RotatingFileLogger.shared.log("pace", "Simulator seed skipped: Health not available.")
             return
         }
         if !force, defaults.bool(forKey: SimulatorSeedDefaultsKey.didSeed) {
@@ -213,12 +208,12 @@ extension WalkingPaceService {
         do {
             try await healthStore.requestAuthorization(toShare: [type], read: [type])
         } catch {
-            paceDetail = "Health authorization failed (\(error.localizedDescription))."
+            RotatingFileLogger.shared.log("pace", "Simulator seed: Health authorization failed — \(error.localizedDescription)")
             return
         }
 
         guard healthStore.authorizationStatus(for: type) == .sharingAuthorized else {
-            paceDetail = "Allow Random Walker to access Walking Speed (read/write) in Health to load simulator samples."
+            RotatingFileLogger.shared.log("pace", "Simulator seed: walking speed not authorized after request.")
             return
         }
 
@@ -276,13 +271,14 @@ extension WalkingPaceService {
                 }
             }
         } catch {
-            paceDetail = "Could not save simulator samples (\(error.localizedDescription))."
+            RotatingFileLogger.shared.log("pace", "Simulator seed: save failed — \(error.localizedDescription)")
             return
         }
 
         defaults.set(true, forKey: SimulatorSeedDefaultsKey.didSeed)
         await refreshHealthKitWalkingSpeedMedian()
         recomputeEffective()
+        RotatingFileLogger.shared.log("pace", "Simulator walking-speed fixtures saved (\(samples.count) samples).")
     }
 }
 #endif

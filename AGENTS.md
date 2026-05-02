@@ -25,6 +25,8 @@ If no page fits, add a new **kebab-case** file under `docs/` and link it from `d
 
 ## Code
 
+- **Reload simulators after code changes (agents, default):** Any time you change Swift, app resources, `project.yml`, or anything that affects the built **RandomWalker** / **RandomWalkerWatch** apps, finish by running `./scripts/run_ios_watch_sim_pair.py` from the repo root so the **paired iPhone + Watch simulators** install and **launch** the fresh build. Do not end an implementation turn with only `xcodebuild` unless the user explicitly asked not to touch simulators. Use `--skip-xcodegen` only when the Xcode project is already up to date; omit it after `project.yml` or entitlements changes. Details and rationale: the bullet below and [docs/build-and-test.md](docs/build-and-test.md).
+
 - Follow [docs/code-conventions.md](docs/code-conventions.md) for where to place logic (Core vs app) and docstring style.
 - After editing `project.yml` or **adding new source files** under an XcodeGen-managed folder, run `xcodegen generate` before claiming the Xcode project is current.
 - **Always run a build** after you change implementation code (Swift, shared Core, or anything that affects compilation). Do not treat the work as done until the iOS target builds successfully using the flow in [docs/build-and-test.md](docs/build-and-test.md). Run `swift test` when you touch `RandomWalkerCore` or its tests.
