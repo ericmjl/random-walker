@@ -65,48 +65,53 @@ struct PlanWalkView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    locationPermissionCallout
-
-                    WalkMapCard(
-                        coordinates: session.refinedWalk?.coordinates ?? [],
-                        userCoordinate: locationService.lastLocation?.coordinate,
-                        isNavigating: session.isNavigating,
-                        userCourse: userCourseFromLocation,
-                        maneuverCoordinate: session.maneuverCoordinateForNavigation(),
-                        navigationStepIndex: session.navigationStepIndex
-                    )
-                    .frame(height: session.isNavigating ? 380 : 320)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-                    if session.isNavigating {
-                        navigationGuidanceCard
-                    }
-
-                    statusSection
-
-                    if session.refinedWalk != nil {
-                        if session.isNavigating {
-                            stopGuidanceControl
-                        } else {
-                            routeReadyActions
-                        }
-                    } else {
-                        planRouteEntryButton
-                    }
+            Group {
+                if session.isNavigating {
+                    turnByTurnWithMapView
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding()
+                } else {
+                    planAndMapScrollContent
                 }
-                .padding()
             }
-            .navigationTitle("Random Walker")
+            .navigationTitle(session.isNavigating ? "" : "Random Walker")
+            .navigationBarTitleDisplayMode(session.isNavigating ? .inline : .large)
             .toolbar {
-                if session.refinedWalk != nil {
+                if session.isNavigating {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("End walk", systemImage: "xmark.circle") {
+                            showStopGuidanceConfirmation = true
+                        }
+                        .accessibilityLabel("End walk")
+                    }
+                } else if session.refinedWalk != nil {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Clear map", systemImage: "xmark.circle") {
                             session.clearActiveWalk(connectivity: connectivity)
                         }
                     }
                 }
+            }
+            .toolbar(session.isNavigating ? .hidden : .automatic, for: .tabBar)
+            .confirmationDialog(
+                "Stop guidance?",
+                isPresented: $showStopGuidanceConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Save to history") {
+                    Task {
+                        await session.stopAndSaveToHistory(
+                            modelContext: modelContext,
+                            connectivity: connectivity
+                        )
+                    }
+                }
+                Button("Discard", role: .destructive) {
+                    session.discardNavigationWithoutSaving(connectivity: connectivity)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Save your GPS path so far, discard it, or keep navigating.")
             }
             .sheet(isPresented: $showNewRouteSheet) {
                 NewRoutePlanningSheet(
@@ -152,37 +157,71 @@ struct PlanWalkView: View {
         return course
     }
 
+    /// Planning / pre-start UI: map, status, and route actions.
     @ViewBuilder
-    private var stopGuidanceControl: some View {
-        Button(role: .cancel) {
-            showStopGuidanceConfirmation = true
-        } label: {
-            Label("Stop guidance", systemImage: "stop.circle")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.bordered)
-        .confirmationDialog(
-            "Stop guidance?",
-            isPresented: $showStopGuidanceConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Save to history") {
-                Task {
-                    await session.stopAndSaveToHistory(
-                        modelContext: modelContext,
-                        connectivity: connectivity
-                    )
+    private var planAndMapScrollContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                locationPermissionCallout
+
+                WalkMapCard(
+                    coordinates: session.refinedWalk?.coordinates ?? [],
+                    userCoordinate: locationService.lastLocation?.coordinate,
+                    isNavigating: false,
+                    userCourse: userCourseFromLocation,
+                    maneuverCoordinate: session.maneuverCoordinateForNavigation(),
+                    navigationStepIndex: session.navigationStepIndex
+                )
+                .frame(height: 320)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                statusSection
+
+                if session.refinedWalk != nil {
+                    routeReadyActions
+                } else {
+                    planRouteEntryButton
                 }
             }
-            Button("Discard", role: .destructive) {
-                session.discardNavigationWithoutSaving(connectivity: connectivity)
+            .padding()
+        }
+    }
+
+    /// During **Start walk**: turn-by-turn text plus live chase-map, heading arrow, and next-turn marker.
+    @ViewBuilder
+    private var turnByTurnWithMapView: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
+                if let primary = session.navigationInstructionText() {
+                    Text(primary)
+                        .font(.title2.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let loc = locationService.lastLocation,
+                   let meters = session.distanceToNavigationManeuver(from: loc) {
+                    Text("In \(PlanWalkView.formatDistanceMeters(meters))")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                if let then = session.navigationThenText() {
+                    Text(then)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Save your GPS path so far, discard it, or keep navigating.")
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            WalkMapCard(
+                coordinates: session.refinedWalk?.coordinates ?? [],
+                userCoordinate: locationService.lastLocation?.coordinate,
+                isNavigating: true,
+                userCourse: userCourseFromLocation,
+                maneuverCoordinate: session.maneuverCoordinateForNavigation(),
+                navigationStepIndex: session.navigationStepIndex
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
     }
 
@@ -245,52 +284,6 @@ struct PlanWalkView: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
         .disabled(session.isPlanning || isResolvingLocation || !locationService.canStartPlanning)
-    }
-
-    @ViewBuilder
-    private var navigationGuidanceCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let primary = session.navigationInstructionText() {
-                Text(primary)
-                    .font(.title2.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let loc = locationService.lastLocation,
-               let meters = session.distanceToNavigationManeuver(from: loc) {
-                Text("In \(PlanWalkView.formatDistanceMeters(meters))")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
-            if let then = session.navigationThenText() {
-                Text(then)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if session.navigationStepCount > 0 {
-                Text("Step \(session.navigationStepIndex + 1) of \(session.navigationStepCount)")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            Button {
-                Task {
-                    guard let loc = locationService.lastLocation else { return }
-                    await session.replanFromCurrentLocation(loc, connectivity: connectivity)
-                }
-            } label: {
-                if session.isReplanningFromDeviation {
-                    Label("Recalculating route…", systemImage: "arrow.triangle.2.circlepath")
-                } else {
-                    Label("Recalculate route from here", systemImage: "arrow.triangle.2.circlepath")
-                }
-            }
-            .buttonStyle(.bordered)
-            .disabled(session.isReplanningFromDeviation || locationService.lastLocation == nil)
-        }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private static func formatDistanceMeters(_ m: CLLocationDistance) -> String {
@@ -426,12 +419,25 @@ private struct WalkMapCard: View {
     @State private var cameraPosition: MapCameraPosition = .automatic
     /// Avoids resetting zoom on every GPS tick; we only auto-frame when the route changes or the user first appears.
     @State private var didAutoFrameUserOnlyMap = false
+    /// Matches the chase camera heading so the user arrow aligns with map north / forward on screen.
+    @State private var navigationCameraHeading: CLLocationDirection = 0
 
     var body: some View {
         Map(position: $cameraPosition, interactionModes: .all) {
             if let userCoordinate {
-                Marker("You", coordinate: userCoordinate)
-                    .tint(.green)
+                if isNavigating {
+                    Annotation("", coordinate: userCoordinate) {
+                        navigationUserPuck
+                    }
+                } else {
+                    Marker("You", coordinate: userCoordinate)
+                        .tint(.green)
+                }
+            }
+
+            if isNavigating, let maneuverCoordinate {
+                Marker("Turn", coordinate: maneuverCoordinate)
+                    .tint(.orange)
             }
 
             if coordinates.count >= 2 {
@@ -472,9 +478,67 @@ private struct WalkMapCard: View {
                 fitCameraToRouteOrUser()
             }
         }
+        .onChange(of: userCoordinate?.latitude ?? 0) { _, _ in
+            if isNavigating { applyNavigationFollowCamera() }
+        }
+        .onChange(of: userCoordinate?.longitude ?? 0) { _, _ in
+            if isNavigating { applyNavigationFollowCamera() }
+        }
         .onAppear {
             fitCameraToRouteOrUser()
         }
+    }
+
+    /// Heading to use for the forward arrow: GPS course when valid, otherwise bearing toward the upcoming maneuver.
+    private var forwardHeadingNorthClockwise: CLLocationDirection {
+        guard let userCoordinate else { return 0 }
+        if let userCourse, userCourse >= 0 {
+            return userCourse
+        }
+        if let maneuverCoordinate {
+            return WalkRouteNavigator.bearing(from: userCoordinate, to: maneuverCoordinate)
+        }
+        return 0
+    }
+
+    private var navigationUserPuck: some View {
+        let forwardRot = Self.normalizeAngleDegrees(forwardHeadingNorthClockwise - navigationCameraHeading)
+        let showTurnArrow: Double? = {
+            guard let userCoordinate, let maneuverCoordinate else { return nil }
+            let toTurn = WalkRouteNavigator.bearing(from: userCoordinate, to: maneuverCoordinate)
+            let delta = abs(Self.normalizeAngleDegrees(toTurn - forwardHeadingNorthClockwise))
+            return delta > 12 ? toTurn : nil
+        }()
+        return ZStack {
+            Circle()
+                .fill(.green.opacity(0.95))
+                .frame(width: 18, height: 18)
+                .overlay {
+                    Circle().strokeBorder(.white, lineWidth: 2)
+                }
+            Image(systemName: "arrowtriangle.up.fill")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.white)
+                .offset(y: -15)
+                .rotationEffect(.degrees(forwardRot))
+                .accessibilityLabel("Your direction of travel")
+            if let toTurn = showTurnArrow {
+                let turnRot = Self.normalizeAngleDegrees(toTurn - navigationCameraHeading)
+                Image(systemName: "arrowtriangle.up.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.orange)
+                    .offset(y: -30)
+                    .rotationEffect(.degrees(turnRot))
+                    .accessibilityLabel("Toward next turn")
+            }
+        }
+    }
+
+    private static func normalizeAngleDegrees(_ degrees: Double) -> Double {
+        var a = degrees.truncatingRemainder(dividingBy: 360)
+        if a > 180 { a -= 360 }
+        if a < -180 { a += 360 }
+        return a
     }
 
     private func fitCameraToRouteOrUser() {
@@ -508,6 +572,7 @@ private struct WalkMapCard: View {
         } else {
             heading = 0
         }
+        navigationCameraHeading = heading
         let camera = MapCamera(
             centerCoordinate: userCoordinate,
             distance: 240,
