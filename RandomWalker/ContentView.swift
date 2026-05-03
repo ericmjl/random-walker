@@ -217,95 +217,116 @@ struct PlanWalkView: View {
         return session.navigationDisplayedStepIndex < lastIndex ? 0.42 : 0.12
     }
 
-    /// During **Start walk**: turn-by-turn text plus live chase-map, heading arrow, and next-turn marker.
+    /// During **Start walk**: top **⅓** turn-by-turn (condensed), bottom **⅔** map.
     @ViewBuilder
     private var turnByTurnWithMapView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if session.navigationStepCount > 0 {
-                VStack(alignment: .leading, spacing: 8) {
-                    if session.navigationStepCount > 1 {
-                        ZStack {
-                            TabView(selection: navigationStepPageSelection) {
-                                ForEach(0 ..< session.navigationStepCount, id: \.self) { stepIdx in
-                                    navigationGuidancePage(stepIndex: stepIdx)
-                                        .tag(stepIdx)
-                                        .padding(.horizontal, 22)
-                                }
-                            }
-                            .tabViewStyle(.page(indexDisplayMode: .automatic))
-                            .accessibilityHint("Swipe left or right to view other steps on this route.")
+        GeometryReader { geo in
+            let gutter: CGFloat = 10
+            let hasSteps = session.navigationStepCount > 0
+            let innerHeight = max(0, geo.size.height - (hasSteps ? gutter : 0))
+            let topHeight = hasSteps ? innerHeight * (1.0 / 3.0) : 0
+            let mapHeight = hasSteps ? innerHeight * (2.0 / 3.0) : geo.size.height
 
-                            HStack(spacing: 0) {
-                                Image(systemName: "chevron.compact.left")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.tertiary)
-                                    .opacity(navigationPagerLeadingChevronOpacity)
-                                Spacer(minLength: 0)
-                                Image(systemName: "chevron.compact.right")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.tertiary)
-                                    .opacity(navigationPagerTrailingChevronOpacity)
-                            }
-                            .padding(.horizontal, 2)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                        }
-                        .frame(minHeight: 172)
-                    } else if session.navigationStepCount == 1 {
-                        TabView(selection: navigationStepPageSelection) {
-                            navigationGuidancePage(stepIndex: 0)
-                                .tag(0)
-                        }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
-                        .frame(minHeight: 172)
-                    }
-
-                    if session.isBrowsingAwayFromLiveNavigationStep {
-                        Button("Follow live") {
-                            session.clearNavigationBrowse()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
+            VStack(spacing: hasSteps ? gutter : 0) {
+                if hasSteps {
+                    navigationGuidanceHeader(topBudget: topHeight)
+                        .frame(width: geo.size.width, height: topHeight, alignment: .top)
                 }
+
+                WalkMapCard(
+                    coordinates: session.refinedWalk?.coordinates ?? [],
+                    userCoordinate: locationService.lastLocation?.coordinate,
+                    isNavigating: true,
+                    userCourse: userCourseFromLocation,
+                    maneuverCoordinate: session.maneuverCoordinateForNavigation(),
+                    navigationStepIndex: session.navigationDisplayedStepIndex,
+                    isBrowsingStepsAwayFromLive: session.isBrowsingAwayFromLiveNavigationStep
+                )
+                .frame(width: geo.size.width, height: mapHeight, alignment: .center)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+        }
+    }
+
+    /// Pager + **Follow live** stacked within the fixed top third height budget.
+    @ViewBuilder
+    private func navigationGuidanceHeader(topBudget: CGFloat) -> some View {
+        let followReserve: CGFloat = session.isBrowsingAwayFromLiveNavigationStep ? 38 : 0
+        let pagerHeight = max(96, topBudget - followReserve - 6)
+        VStack(alignment: .leading, spacing: 6) {
+            if session.navigationStepCount > 1 {
+                ZStack {
+                    TabView(selection: navigationStepPageSelection) {
+                        ForEach(0 ..< session.navigationStepCount, id: \.self) { stepIdx in
+                            navigationGuidancePage(stepIndex: stepIdx)
+                                .tag(stepIdx)
+                                .padding(.horizontal, 22)
+                        }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .automatic))
+                    .accessibilityHint("Swipe left or right to view other steps on this route.")
+
+                    HStack(spacing: 0) {
+                        Image(systemName: "chevron.compact.left")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .opacity(navigationPagerLeadingChevronOpacity)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.compact.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .opacity(navigationPagerTrailingChevronOpacity)
+                    }
+                    .padding(.horizontal, 2)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
+                .frame(height: pagerHeight)
+            } else if session.navigationStepCount == 1 {
+                TabView(selection: navigationStepPageSelection) {
+                    navigationGuidancePage(stepIndex: 0)
+                        .tag(0)
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .frame(height: pagerHeight)
             }
 
-            WalkMapCard(
-                coordinates: session.refinedWalk?.coordinates ?? [],
-                userCoordinate: locationService.lastLocation?.coordinate,
-                isNavigating: true,
-                userCourse: userCourseFromLocation,
-                maneuverCoordinate: session.maneuverCoordinateForNavigation(),
-                navigationStepIndex: session.navigationDisplayedStepIndex,
-                isBrowsingStepsAwayFromLive: session.isBrowsingAwayFromLiveNavigationStep
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            if session.isBrowsingAwayFromLiveNavigationStep {
+                Button("Follow live") {
+                    session.clearNavigationBrowse()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
         }
     }
 
     @ViewBuilder
     private func navigationGuidancePage(stepIndex: Int) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             if let primary = session.navigationInstructionTextForStep(at: stepIndex) {
                 Text(primary)
-                    .font(.title2.weight(.semibold))
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(4)
+                    .minimumScaleFactor(0.85)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let loc = locationService.lastLocation,
                let meters = session.distanceToManeuver(forStepIndex: stepIndex, from: loc) {
                 Text("In \(PlanWalkView.formatDistanceMeters(meters))")
-                    .font(.title3)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
             }
             if let then = session.navigationThenTextForStep(after: stepIndex) {
                 Text(then)
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.9)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Text("Step \(stepIndex + 1) of \(session.navigationStepCount)")
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
