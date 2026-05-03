@@ -1,5 +1,6 @@
 # SwiftPM / local tool output
 .build/
+.swiftpm/
 
 # Xcode
 DerivedData/

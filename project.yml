@@ -33,6 +33,7 @@ targets:
       # Watch app is a separate target/scheme so iOS Simulator builds do not
       # require a matching watchOS simulator runtime.
     settings:
+      DEVELOPMENT_TEAM: 2GY49RTSYX
       PRODUCT_BUNDLE_IDENTIFIER: dev.ericmjl.randomwalker
       INFOPLIST_FILE: RandomWalker/Info.plist
       GENERATE_INFOPLIST_FILE: YES
@@ -53,6 +54,7 @@ targets:
       - target: RandomWalkerCore
         embed: true
     settings:
+      DEVELOPMENT_TEAM: 2GY49RTSYX
       PRODUCT_BUNDLE_IDENTIFIER: dev.ericmjl.randomwalker.watchkitapp
       INFOPLIST_FILE: RandomWalkerWatch/Info.plist
       GENERATE_INFOPLIST_FILE: YES
