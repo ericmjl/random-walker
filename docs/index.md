@@ -13,6 +13,7 @@ Start here. These pages capture **product intent** and **technical decisions** s
 | [map-and-location.md](map-and-location.md) | MapKit UI (camera, zoom), Core Location permissions, and planning coordinates. |
 | [walking-pace.md](walking-pace.md) | Personalized walking speed (Health, saved walks), `planLoop` wiring, **simulator Health fixtures**, testing. |
 | [in-app-navigation.md](in-app-navigation.md) | Turn-by-turn after **Start**, step progression, chase camera, completion → History. |
+| [monetization.md](monetization.md) | Freemium / Pro unlock recommendation, pricing posture, and models to avoid. |
 | [build-and-test.md](build-and-test.md) | Commands for generating the project, building, and running core tests. |
 | [code-conventions.md](code-conventions.md) | Where to put logic, testing expectations, and documentation style in source. |
 
