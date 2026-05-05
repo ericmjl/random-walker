@@ -428,6 +428,29 @@ final class WalkSessionViewModel {
         return location.distance(from: end)
     }
 
+    /// Straight-line distance left to the maneuver for the **live** step, plus summed `RoutedNavigationStep.distance` for subsequent steps.
+    ///
+    /// Uses the live ``navigationStepIndex`` (not the paged browse index) so trip stats stay aligned with progress.
+    func navigationRemainingDistanceApprox(from location: CLLocation) -> CLLocationDistance? {
+        guard let nav = routeNavigator else { return nil }
+        let i = navigationStepIndex
+        guard i < nav.steps.count else { return 0 }
+        var total = distanceToManeuver(forStepIndex: i, from: location) ?? nav.steps[i].distance
+        if (i + 1) < nav.steps.count {
+            for j in (i + 1) ..< nav.steps.count {
+                total += nav.steps[j].distance
+            }
+        }
+        return max(0, total)
+    }
+
+    /// Remaining duration from ``navigationRemainingDistanceApprox`` and walking speed (no traffic model).
+    func navigationRemainingDurationApprox(from location: CLLocation, walkingSpeedMetersPerSecond: Double) -> TimeInterval? {
+        guard let meters = navigationRemainingDistanceApprox(from: location) else { return nil }
+        let pace = max(0.5, walkingSpeedMetersPerSecond)
+        return meters / pace
+    }
+
     func maneuverCoordinateForNavigation() -> CLLocationCoordinate2D? {
         maneuverCoordinate(forStepIndex: navigationDisplayedStepIndex)
     }

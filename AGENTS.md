@@ -47,6 +47,28 @@ If no page fits, add a new **kebab-case** file under `docs/` and link it from `d
     -destination "$(scripts/print_ios_sim_destination.py)" build
   ```
 
+## Physical iPhone (CLI and agents)
+
+- **Programmatic install**: From the repo root, with **one** unlocked/plugged-in iPhone trusted for development (or set ``RANDOM_WALKER_IOS_DEVICE_UDID`` when several devices appear in ``scripts/print_ios_physical_device_destination.py --list``):
+
+  ```bash
+  scripts/install_randomwalker_ios_device.py
+  ```
+
+  Regenerates via ``xcodegen`` by default, builds **Debug** for ``iphoneos`` into ``.build/ios-device-derived/``, runs ``xcodebuild -allowProvisioningUpdates``, installs with ``xcrun devicectl device install app``, then attempts ``devicectl device process launch`` on bundle id ``dev.ericmjl.randomwalker``.
+
+- **Flags**: ``--skip-xcodegen``, ``--skip-build`` (reuse prior device build), ``--no-launch`` (install only).
+
+- **Provisioning**: Requires the same Apple Development team as ``DEVELOPMENT_TEAM`` in ``project.yml`` and Xcode signed in; first-time profile fetch is handled by ``-allowProvisioningUpdates`` on CI-capable Macs. Open the project in Xcode once if the scripted build cannot create a profile.
+
+- **Launch caveat**: ``devicectl`` launch fails with a **locked** device; unlocking first is enough—the app is still installed.
+
+- **xcodebuild destination string** (reuse in custom scripts): ``-destination "$(scripts/print_ios_physical_device_destination.py)"``; UDID only: ``scripts/print_ios_physical_device_destination.py --udid-only``.
+
+- **Watch app**: This flow targets the **iPhone** app only; the Watch target remains on the simulator pairing script.
+
+- **Documentation**: [docs/build-and-test.md](docs/build-and-test.md) summarizes the same commands for humans.
+
 ## iOS Simulator (CLI and agents)
 
 - **Do not hard-code** a simulator OS in `xcodebuild` examples (e.g. `OS=18.6`): different machines install different runtimes.

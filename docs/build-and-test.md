@@ -23,4 +23,22 @@ This picks a paired iPhone + Watch (defaults to the **iPhone 17** pair if presen
 
 On the **iOS Simulator**, accept the Health permission when prompted if you want **walking-speed** sample data for [`WalkingPaceService`](walking-pace.md) (see **Simulator + Health** in that page).
 
+## Physical iPhone (USB / trusted developer device)
+
+CLI install uses **automatic signing**, your logged-in Xcode Apple ID team, CoreDevice tooling, and a known derived-data path:
+
+```bash
+# One connected iPhone/iPodtouch; if multiple, set RANDOM_WALKER_IOS_DEVICE_UDID first.
+scripts/print_ios_physical_device_destination.py --list
+scripts/install_randomwalker_ios_device.py
+scripts/install_randomwalker_ios_device.py --skip-xcodegen   # Xcode project already current
+scripts/install_randomwalker_ios_device.py --skip-build --no-launch --skip-xcodegen   # reinstall last build
+```
+
+- **Provisioning**: Xcode must already have downloaded a provisioning profile for `dev.ericmjl.randomwalker` (open the project once in Xcode or rely on `-allowProvisioningUpdates` during the scripted build).
+- **Launch**: Automatic launch after install may fail while the phone is **locked**. Unlock first, open the icon, or run the `devicectl process launch …` line the script prints.
+- **Apple Watch companion**: Not covered here; simulator pairing still uses `./scripts/run_ios_watch_sim_pair.py`.
+
+Details and prerequisites for automation agents live in **[AGENTS.md](../AGENTS.md)** (physical iPhone subsection).
+
 For where code should live and how to test it, see [code-conventions.md](code-conventions.md).

@@ -8,5 +8,9 @@ DerivedData/
 *.xcuserdatad/
 xcuserdata/
 
+# Python (repo CLI helpers)
+__pycache__/
+*.py[cod]
+
 # macOS
 .DS_Store

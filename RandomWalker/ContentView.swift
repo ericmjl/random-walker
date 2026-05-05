@@ -62,6 +62,8 @@ struct PlanWalkView: View {
     @State private var isResolvingLocation = false
     @State private var showStopGuidanceConfirmation = false
     @State private var showNewRouteSheet = false
+    /// North-up overview of the full planned route while navigating (Apple Maps–style route preview).
+    @State private var navigationShowsRouteOverview = false
 
     var body: some View {
         NavigationStack {
@@ -149,6 +151,9 @@ struct PlanWalkView: View {
             } message: {
                 Text(session.navigationCompletionNotice ?? "")
             }
+            .onChange(of: session.isNavigating) { _, navigating in
+                if !navigating { navigationShowsRouteOverview = false }
+            }
         }
     }
 
@@ -217,22 +222,12 @@ struct PlanWalkView: View {
         return session.navigationDisplayedStepIndex < lastIndex ? 0.42 : 0.12
     }
 
-    /// During **Start walk**: top **⅓** turn-by-turn (condensed), bottom **⅔** map.
+    /// During **Start walk**: map-first full-bleed layout with a top instruction card, bottom trip sheet, and floating controls (Apple Maps–inspired).
     @ViewBuilder
     private var turnByTurnWithMapView: some View {
         GeometryReader { geo in
-            let gutter: CGFloat = 10
             let hasSteps = session.navigationStepCount > 0
-            let innerHeight = max(0, geo.size.height - (hasSteps ? gutter : 0))
-            let topHeight = hasSteps ? innerHeight * (1.0 / 3.0) : 0
-            let mapHeight = hasSteps ? innerHeight * (2.0 / 3.0) : geo.size.height
-
-            VStack(spacing: hasSteps ? gutter : 0) {
-                if hasSteps {
-                    navigationGuidanceHeader(topBudget: topHeight)
-                        .frame(width: geo.size.width, height: topHeight, alignment: .top)
-                }
-
+            ZStack(alignment: .bottom) {
                 WalkMapCard(
                     coordinates: session.refinedWalk?.coordinates ?? [],
                     userCoordinate: locationService.lastLocation?.coordinate,
@@ -240,96 +235,246 @@ struct PlanWalkView: View {
                     userCourse: userCourseFromLocation,
                     maneuverCoordinate: session.maneuverCoordinateForNavigation(),
                     navigationStepIndex: session.navigationDisplayedStepIndex,
-                    isBrowsingStepsAwayFromLive: session.isBrowsingAwayFromLiveNavigationStep
+                    isBrowsingStepsAwayFromLive: session.isBrowsingAwayFromLiveNavigationStep,
+                    showRouteOverview: navigationShowsRouteOverview
                 )
-                .frame(width: geo.size.width, height: mapHeight, alignment: .center)
+                .frame(width: geo.size.width, height: geo.size.height)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                if hasSteps {
+                    VStack(spacing: 0) {
+                        navigationTopInstructionStack(maxWidth: geo.size.width)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+
+                    VStack(spacing: 10) {
+                        Spacer(minLength: 0)
+                        HStack(alignment: .bottom) {
+                            Spacer(minLength: 0)
+                            navigationFloatingControlStack
+                        }
+                        navigationBottomTripSheet
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 8)
+                }
             }
         }
     }
 
-    /// Pager + **Follow live** stacked within the fixed top third height budget.
+    /// Top card + **Follow live** when paging away from the GPS step.
     @ViewBuilder
-    private func navigationGuidanceHeader(topBudget: CGFloat) -> some View {
-        let followReserve: CGFloat = session.isBrowsingAwayFromLiveNavigationStep ? 38 : 0
-        let pagerHeight = max(96, topBudget - followReserve - 6)
-        VStack(alignment: .leading, spacing: 6) {
-            if session.navigationStepCount > 1 {
-                ZStack {
-                    TabView(selection: navigationStepPageSelection) {
-                        ForEach(0 ..< session.navigationStepCount, id: \.self) { stepIdx in
-                            navigationGuidancePage(stepIndex: stepIdx)
-                                .tag(stepIdx)
-                                .padding(.horizontal, 22)
-                        }
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .automatic))
-                    .accessibilityHint("Swipe left or right to view other steps on this route.")
-
-                    HStack(spacing: 0) {
-                        Image(systemName: "chevron.compact.left")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                            .opacity(navigationPagerLeadingChevronOpacity)
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.compact.right")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                            .opacity(navigationPagerTrailingChevronOpacity)
-                    }
-                    .padding(.horizontal, 2)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-                }
-                .frame(height: pagerHeight)
-            } else if session.navigationStepCount == 1 {
-                TabView(selection: navigationStepPageSelection) {
-                    navigationGuidancePage(stepIndex: 0)
-                        .tag(0)
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .frame(height: pagerHeight)
-            }
-
+    private func navigationTopInstructionStack(maxWidth: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            navigationGuidancePagerCard(maxWidth: maxWidth)
             if session.isBrowsingAwayFromLiveNavigationStep {
                 Button("Follow live") {
                     session.clearNavigationBrowse()
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .frame(maxWidth: .infinity)
             }
         }
+        .padding(.horizontal, 6)
+        .padding(.top, 4)
+    }
+
+    /// Swipe between maneuvers inside a high-contrast banner (page dots hidden; edge chevrons hint paging).
+    @ViewBuilder
+    private func navigationGuidancePagerCard(maxWidth: CGFloat) -> some View {
+        let cardHeight: CGFloat = min(200, max(132, maxWidth * 0.34))
+        ZStack {
+            if session.navigationStepCount > 1 {
+                TabView(selection: navigationStepPageSelection) {
+                    ForEach(0 ..< session.navigationStepCount, id: \.self) { stepIdx in
+                        navigationGuidancePage(stepIndex: stepIdx)
+                            .tag(stepIdx)
+                            .padding(.horizontal, 18)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .accessibilityHint("Swipe left or right to view other steps on this route.")
+            } else if session.navigationStepCount == 1 {
+                TabView(selection: navigationStepPageSelection) {
+                    navigationGuidancePage(stepIndex: 0)
+                        .tag(0)
+                        .padding(.horizontal, 18)
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+            }
+
+            HStack(spacing: 0) {
+                Image(systemName: "chevron.compact.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .opacity(navigationPagerLeadingChevronOpacity)
+                    .padding(.leading, 4)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.compact.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .opacity(navigationPagerTrailingChevronOpacity)
+                    .padding(.trailing, 4)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .frame(height: cardHeight)
+        .frame(maxWidth: .infinity)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.black.opacity(0.82))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.35), radius: 14, y: 6)
+    }
+
+    private var navigationFloatingControlStack: some View {
+        VStack(spacing: 12) {
+            navigationFloatingIconButton(
+                systemImage: navigationShowsRouteOverview ? "location.north.line.fill" : "map",
+                accessibilityLabel: navigationShowsRouteOverview ? "Follow location" : "Route overview"
+            ) {
+                navigationShowsRouteOverview.toggle()
+            }
+            Image(systemName: "speaker.wave.2.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 46, height: 46)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle().strokeBorder(.white.opacity(0.2), lineWidth: 0.5)
+                }
+                .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                .opacity(0.42)
+                .accessibilityLabel("Voice guidance not available")
+        }
+    }
+
+    private func navigationFloatingIconButton(
+        systemImage: String,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 46, height: 46)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5)
+                }
+                .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var navigationBottomTripSheet: some View {
+        let pace = max(0.5, walkingPace.effectiveWalkingSpeedMetersPerSecond)
+        let loc = locationService.lastLocation
+        let remainingMeters = loc.flatMap { session.navigationRemainingDistanceApprox(from: $0) }
+        let remainingSeconds = loc.flatMap { session.navigationRemainingDurationApprox(from: $0, walkingSpeedMetersPerSecond: pace) }
+        let arrival: Date? = remainingSeconds.map { Date().addingTimeInterval($0) }
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Arrive")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(arrival.map { PlanWalkView.formatShortTime($0) } ?? "—")
+                        .font(.title3.weight(.bold))
+                }
+                Spacer(minLength: 12)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Time")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(remainingSeconds.map { PlanWalkView.formatMinutesRounded($0) } ?? "—")
+                        .font(.title3.weight(.bold))
+                }
+                Spacer(minLength: 12)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Distance")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(remainingMeters.map { PlanWalkView.formatDistanceMeters($0) } ?? "—")
+                        .font(.title3.weight(.bold))
+                }
+            }
+            Button {
+                showStopGuidanceConfirmation = true
+            } label: {
+                Label("End walk", systemImage: "xmark.circle.fill")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red.opacity(0.92))
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThickMaterial)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(.primary.opacity(0.08), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
     }
 
     @ViewBuilder
     private func navigationGuidancePage(stepIndex: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let primary = session.navigationInstructionTextForStep(at: stepIndex) {
-                Text(primary)
-                    .font(.title3.weight(.semibold))
-                    .lineLimit(4)
-                    .minimumScaleFactor(0.85)
-                    .fixedSize(horizontal: false, vertical: true)
+        let instruction = session.navigationInstructionTextForStep(at: stepIndex) ?? "Continue"
+        let symbol = NavigationManeuverGlyph.systemImage(for: instruction)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                if let loc = locationService.lastLocation,
+                   let meters = session.distanceToManeuver(forStepIndex: stepIndex, from: loc) {
+                    Text("In \(PlanWalkView.formatDistanceMeters(meters))")
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .minimumScaleFactor(0.65)
+                        .lineLimit(1)
+                } else {
+                    Text("—")
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                Spacer(minLength: 8)
+                Image(systemName: symbol)
+                    .font(.system(size: 40, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .accessibilityHidden(true)
             }
-            if let loc = locationService.lastLocation,
-               let meters = session.distanceToManeuver(forStepIndex: stepIndex, from: loc) {
-                Text("In \(PlanWalkView.formatDistanceMeters(meters))")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
+            Text(instruction)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+                .lineLimit(3)
+                .minimumScaleFactor(0.88)
+                .fixedSize(horizontal: false, vertical: true)
             if let then = session.navigationThenTextForStep(after: stepIndex) {
                 Text(then)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(2)
                     .minimumScaleFactor(0.9)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Step \(stepIndex + 1) of \(session.navigationStepCount)")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Step \(stepIndex + 1) of \(session.navigationStepCount). Swipe horizontally to review other steps.")
     }
 
     @ViewBuilder
@@ -398,6 +543,23 @@ struct PlanWalkView: View {
             return String(format: "%.1f km", m / 1_000)
         }
         return "\(Int(round(m))) m"
+    }
+
+    private static let shortTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        f.dateStyle = .none
+        return f
+    }()
+
+    private static func formatShortTime(_ date: Date) -> String {
+        shortTimeFormatter.string(from: date)
+    }
+
+    private static func formatMinutesRounded(_ seconds: TimeInterval) -> String {
+        let m = Int((seconds / 60).rounded())
+        if m < 1 { return "< 1 min" }
+        return "\(m) min"
     }
 
     @ViewBuilder
@@ -524,6 +686,8 @@ private struct WalkMapCard: View {
     var navigationStepIndex: Int = 0
     /// When true, map frames user + **displayed** maneuver (browsing). When false during navigation, chase camera stays on the user (live step).
     var isBrowsingStepsAwayFromLive: Bool = false
+    /// North-up full-route framing (user toggle) while navigating.
+    var showRouteOverview: Bool = false
 
     @State private var cameraPosition: MapCameraPosition = .automatic
     /// Avoids resetting zoom on every GPS tick; we only auto-frame when the route changes or the user first appears.
@@ -551,6 +715,9 @@ private struct WalkMapCard: View {
                 } else {
                     fitCameraToRouteOrUser()
                 }
+            }
+            .onChange(of: showRouteOverview) { _, _ in
+                if isNavigating { applyNavigationCamera() }
             }
     }
 
@@ -695,11 +862,33 @@ private struct WalkMapCard: View {
 
     private func applyNavigationCamera() {
         guard isNavigating else { return }
-        if isBrowsingStepsAwayFromLive {
+        if showRouteOverview {
+            applyNavigationRouteOverview()
+        } else if isBrowsingStepsAwayFromLive {
             applyBrowsingOverviewCamera()
         } else {
             applyNavigationFollowCamera()
         }
+    }
+
+    /// Entire planned loop, north up (Apple Maps route-preview style).
+    private func applyNavigationRouteOverview() {
+        guard coordinates.count >= 2 else {
+            navigationCameraHeading = 0
+            if let userCoordinate {
+                cameraPosition = .region(
+                    MKCoordinateRegion(center: userCoordinate, latitudinalMeters: 900, longitudinalMeters: 900)
+                )
+            }
+            return
+        }
+        let mapPoints = coordinates.map(MKMapPoint.init)
+        let rect = mapPoints.reduce(MKMapRect.null) { partial, point in
+            partial.union(MKMapRect(origin: point, size: MKMapSize(width: 0, height: 0)))
+        }
+        let region = MKCoordinateRegion(rect)
+        navigationCameraHeading = 0
+        cameraPosition = .region(region)
     }
 
     /// North-up region showing both the user and the maneuver for the **browsed** step (so the map matches the card).
@@ -746,4 +935,45 @@ private struct WalkMapCard: View {
 #Preview {
     ContentView()
         .modelContainer(for: WalkRecord.self, inMemory: true)
+}
+
+/// SF Symbol for MapKit-style walking instructions (English heuristics).
+private enum NavigationManeuverGlyph {
+    static func systemImage(for instruction: String) -> String {
+        let s = instruction.lowercased()
+        if s.contains("u-turn") || s.contains("uturn") || s.contains("make a u") {
+            return "arrow.uturn.backward.circle.fill"
+        }
+        if s.contains("slight right") {
+            return "arrow.up.right"
+        }
+        if s.contains("slight left") {
+            return "arrow.up.left"
+        }
+        if s.contains("sharp right") || s.contains("hard right") {
+            return "arrow.turn.up.right"
+        }
+        if s.contains("sharp left") || s.contains("hard left") {
+            return "arrow.turn.up.left"
+        }
+        if s.contains("turn right") || s.contains("bear right") || s.contains("right onto") {
+            return "arrow.turn.up.right"
+        }
+        if s.contains("turn left") || s.contains("bear left") || s.contains("left onto") {
+            return "arrow.turn.up.left"
+        }
+        if s.contains("merge") {
+            return "arrow.merge"
+        }
+        if s.contains("roundabout") || s.contains("rotary") {
+            return "arrow.trianglehead.merge"
+        }
+        if s.contains("destination") || s.contains("arrive") || s.contains("arriving") {
+            return "flag.checkered"
+        }
+        if s.contains("continue") || s.contains("head ") || s.hasPrefix("walk ") {
+            return "arrow.up"
+        }
+        return "arrow.up.circle.fill"
+    }
 }
