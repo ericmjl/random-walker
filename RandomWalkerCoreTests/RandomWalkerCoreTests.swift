@@ -1,3 +1,4 @@
+import CoreLocation
 import RandomWalkerCore
 import XCTest
 
@@ -183,6 +184,92 @@ final class RoutedWalkNavigationProgressTests: XCTestCase {
     }
 }
 
+final class WalkRouteNavigatorTests: XCTestCase {
+    func testAdvance_requiresTwoConsecutiveReadingsInsideAdvanceRadius() {
+        let maneuverLat = 40.7589
+        let maneuverLon = -73.9851
+
+        let leg = WalkLegHint(
+            title: "Turn north",
+            distanceMeters: 50,
+            expectedTravelTime: 60,
+            maneuverLatitude: maneuverLat,
+            maneuverLongitude: maneuverLon
+        )
+
+        var navigator = WalkRouteNavigator(legs: [leg])
+
+        let atManeuver = CLLocation(latitude: maneuverLat, longitude: maneuverLon)
+
+        navigator.ingest(userLocation: atManeuver)
+        XCTAssertEqual(navigator.currentIndex, 0)
+
+        navigator.ingest(userLocation: atManeuver)
+        XCTAssertEqual(navigator.currentIndex, 1)
+
+        XCTAssertTrue(navigator.isComplete)
+    }
+
+    func testLeavingAdvanceRadius_resetsConsecutiveCounter() {
+        let maneuverLat = 40.7589
+        let maneuverLon = -73.9851
+        let leg = WalkLegHint(
+            title: "Turn",
+            distanceMeters: 100,
+            expectedTravelTime: 90,
+            maneuverLatitude: maneuverLat,
+            maneuverLongitude: maneuverLon
+        )
+        var navigator = WalkRouteNavigator(legs: [leg])
+        let atManeuver = CLLocation(latitude: maneuverLat, longitude: maneuverLon)
+        let far = CLLocation(latitude: maneuverLat + 0.005, longitude: maneuverLon)
+
+        navigator.ingest(userLocation: atManeuver)
+        navigator.ingest(userLocation: far)
+        navigator.ingest(userLocation: atManeuver)
+
+        XCTAssertEqual(navigator.currentIndex, 0)
+    }
+
+    func testSupportsGPSAdvancement_falseWhenCoordinatesMissing() {
+        let incomplete = WalkLegHint(
+            title: "Walk",
+            distanceMeters: 10,
+            expectedTravelTime: 20,
+            maneuverLatitude: nil,
+            maneuverLongitude: nil
+        )
+
+        XCTAssertFalse(WalkRouteNavigator.supportsGPSAdvancement(legs: [incomplete]))
+
+        XCTAssertFalse(
+            WalkRouteNavigator.supportsGPSAdvancement(
+                legs: [
+                    incomplete,
+                    WalkLegHint(
+                        title: "Next",
+                        distanceMeters: 10,
+                        expectedTravelTime: 20,
+                        maneuverLatitude: 1,
+                        maneuverLongitude: 2
+                    ),
+                ]
+            )
+        )
+    }
+
+    func testSupportsGPSAdvancement_trueWhenComplete() {
+        let leg = WalkLegHint(
+            title: "Corner",
+            distanceMeters: 12,
+            expectedTravelTime: 15,
+            maneuverLatitude: 35.6812,
+            maneuverLongitude: 139.7671
+        )
+        XCTAssertTrue(WalkRouteNavigator.supportsGPSAdvancement(legs: [leg]))
+    }
+}
+
 final class ActiveWalkSnapshotTests: XCTestCase {
     func testJSONRoundTrip() throws {
         let snapshot = ActiveWalkSnapshot(
@@ -200,7 +287,33 @@ final class ActiveWalkSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.routeId, snapshot.routeId)
         XCTAssertEqual(decoded.legs.count, 1)
         XCTAssertEqual(decoded.legs.first?.title, "Turn left")
+        XCTAssertNil(decoded.legs.first?.maneuverLatitude)
         XCTAssertNil(decoded.navigationSessionId)
+    }
+
+    func testJSONRoundTrip_includesManeuverCoordinates() throws {
+        let rid = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let snapshot = ActiveWalkSnapshot(
+            routeId: rid,
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            legs: [
+                WalkLegHint(
+                    title: "Bear right",
+                    distanceMeters: 88,
+                    expectedTravelTime: 70,
+                    maneuverLatitude: 48.8584,
+                    maneuverLongitude: 2.2945
+                ),
+            ],
+            totalDistanceMeters: 900,
+            expectedDurationSeconds: 700
+        )
+
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(ActiveWalkSnapshot.self, from: data)
+        let first = try XCTUnwrap(decoded.legs.first)
+        XCTAssertEqual(try XCTUnwrap(first.maneuverLatitude), 48.8584, accuracy: 0.000_001)
+        XCTAssertEqual(try XCTUnwrap(first.maneuverLongitude), 2.2945, accuracy: 0.000_001)
     }
 
     func testSnapshotWithNavigationSessionRoundTrip() throws {

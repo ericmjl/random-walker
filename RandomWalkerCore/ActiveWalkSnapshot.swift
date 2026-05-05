@@ -36,12 +36,24 @@ public struct WalkLegHint: Codable, Sendable, Equatable, Identifiable {
     public var title: String
     public var distanceMeters: Double
     public var expectedTravelTime: TimeInterval
+    /// Turn maneuver location (Maps step end point). Older payloads omit both; omitting disables GPS advancement on Watch.
+    public var maneuverLatitude: Double?
+    public var maneuverLongitude: Double?
 
-    public init(id: UUID = UUID(), title: String, distanceMeters: Double, expectedTravelTime: TimeInterval) {
+    public init(
+        id: UUID = UUID(),
+        title: String,
+        distanceMeters: Double,
+        expectedTravelTime: TimeInterval,
+        maneuverLatitude: Double? = nil,
+        maneuverLongitude: Double? = nil
+    ) {
         self.id = id
         self.title = title
         self.distanceMeters = distanceMeters
         self.expectedTravelTime = expectedTravelTime
+        self.maneuverLatitude = maneuverLatitude
+        self.maneuverLongitude = maneuverLongitude
     }
 }
 

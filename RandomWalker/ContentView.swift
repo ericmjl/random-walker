@@ -78,15 +78,6 @@ struct PlanWalkView: View {
             .toolbar(session.isNavigating ? .hidden : .automatic, for: .navigationBar)
             .navigationTitle(session.isNavigating ? "" : "Random Walker")
             .navigationBarTitleDisplayMode(session.isNavigating ? .inline : .large)
-            .toolbar {
-                if session.refinedWalk != nil, !session.isNavigating {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Clear map", systemImage: "xmark.circle") {
-                            session.clearActiveWalk(connectivity: connectivity)
-                        }
-                    }
-                }
-            }
             .toolbar(session.isNavigating ? .hidden : .automatic, for: .tabBar)
             .confirmationDialog(
                 "Stop guidance?",
@@ -552,6 +543,17 @@ struct PlanWalkView: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
             .disabled(session.isPlanning || isResolvingLocation || !locationService.canStartPlanning)
+
+            /// In-context reset (not a “close” affordance)—avoid toolbar ⓧ on the same tab as the empty state.
+            Button(role: .destructive) {
+                session.clearActiveWalk(connectivity: connectivity)
+            } label: {
+                Text("Remove route from map")
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -648,6 +650,11 @@ struct PlanWalkView: View {
             if let error = session.planningError {
                 Text(error)
                     .foregroundStyle(.red)
+            } else if session.refinedWalk != nil {
+                Text(
+                    "Your loop is on the map below. Start when you’re ready, or build a different route—you’re still on Plan."
+                )
+                .foregroundStyle(.secondary)
             } else {
                 Text(instructions)
                     .foregroundStyle(.secondary)

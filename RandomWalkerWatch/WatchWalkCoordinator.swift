@@ -1,7 +1,9 @@
 import CoreLocation
+import Dispatch
 import Foundation
 import RandomWalkerCore
 import WatchConnectivity
+import WatchKit
 
 /// Values extracted from ``WCSession`` application context on the delegate queue (``Sendable`` for Swift 6).
 private struct PhoneApplicationContextPayload: Sendable {
@@ -16,16 +18,13 @@ private struct PhoneApplicationContextPayload: Sendable {
     }
 }
 
-private final class WatchMessageReplyBox: @unchecked Sendable {
-    let handler: ([String: Any]) -> Void
-
-    init(_ handler: @escaping ([String: Any]) -> Void) {
-        self.handler = handler
-    }
-
-    func callAsFunction(_ reply: [String: Any]) {
-        handler(reply)
-    }
+/// Encodes cue content only (excluding per-transfer random `WalkLegHint.id`) so identical WatchConnectivity replays do not reset progress mid-walk.
+private struct WalkLegCueSignature: Codable, Equatable {
+    var title: String
+    var distanceMeters: Double
+    var expectedTravelTime: TimeInterval
+    var maneuverLatitude: Double?
+    var maneuverLongitude: Double?
 }
 
 @MainActor
@@ -33,14 +32,29 @@ final class WatchWalkCoordinator: NSObject, ObservableObject {
     @Published private(set) var snapshot: ActiveWalkSnapshot?
     @Published private(set) var status: String = "Awaiting a loop from iPhone…"
     @Published private(set) var isRecordingGPS: Bool = false
+    /// Live step index driven by GPS (same advancement rules as iPhone navigation).
+    @Published private(set) var watchNavigationStepIndex: Int = 0
+    @Published private(set) var distanceToCurrentManeuverMeters: CLLocationDistance?
+    /// True when this session’s payload carries maneuver coordinates and the watch advances steps automatically.
+    @Published private(set) var isWatchGPSGuidanceActive: Bool = false
+    /// True once every cue in the synced payload has been consumed on the Watch.
+    @Published private(set) var isSyncedRouteCuesFinishedOnWatch: Bool = false
 
     private let locationManager = CLLocationManager()
+
     private var recordingSessionId: UUID?
     private var recordingRouteId: UUID?
     private var recordingStartedAt: Date?
     private var samples: [GeodesicWaypoint] = []
 
+    /// Mirrored navigator for turn-by-turn (when ``isWatchGPSGuidanceActive`` is true).
+    private var routeNavigator: WalkRouteNavigator?
+    /// Fingerprint of synced cue payloads for the active session (excluding random leg IDs).
+    private var lastSyncedNavigationCueSignatureData: Data?
+
     private static let minSampleSeparationMeters: CLLocationDistance = 8
+    /// Tighter filter while cue-by-cue GPS guidance runs so paired consecutive hits near maneuver points land faster.
+    private static let navigationDistanceFilterMeters: CLLocationDistance = 5
 
     override init() {
         super.init()
@@ -78,8 +92,14 @@ final class WatchWalkCoordinator: NSObject, ObservableObject {
 
             if let sessionId = next.navigationSessionId {
                 beginOrContinueRecording(snapshot: next, sessionId: sessionId)
-                status =
-                    "Recording path • \(next.legs.count) cues. Open the app on iPhone for the full map."
+                if isWatchGPSGuidanceActive {
+                    status = "Navigation on Watch • recording path."
+                } else if !next.legs.isEmpty {
+                    status =
+                        "Recording • use Back/Next to browse cues—update iPhone/watch app for GPS turns."
+                } else {
+                    status = "Recording walk path for iPhone…"
+                }
             } else {
                 stopRecordingTransferAndResetState(sendToPhone: true)
                 status = "Route ready: \(next.legs.count) cues."
@@ -87,6 +107,24 @@ final class WatchWalkCoordinator: NSObject, ObservableObject {
         } catch {
             status = "Could not read the route payload."
         }
+    }
+
+    private func rebuildWatchRouteNavigator(legs: [WalkLegHint], sessionStarted: Bool) {
+        guard sessionStarted, WalkRouteNavigator.supportsGPSAdvancement(legs: legs) else {
+            routeNavigator = nil
+            isWatchGPSGuidanceActive = false
+            watchNavigationStepIndex = 0
+            distanceToCurrentManeuverMeters = nil
+            isSyncedRouteCuesFinishedOnWatch = false
+            updateLocationDistanceFilter()
+            return
+        }
+        routeNavigator = WalkRouteNavigator(legs: legs)
+        isWatchGPSGuidanceActive = true
+        watchNavigationStepIndex = 0
+        distanceToCurrentManeuverMeters = nil
+        isSyncedRouteCuesFinishedOnWatch = false
+        updateLocationDistanceFilter()
     }
 
     private func beginOrContinueRecording(snapshot: ActiveWalkSnapshot, sessionId: UUID) {
@@ -98,11 +136,41 @@ final class WatchWalkCoordinator: NSObject, ObservableObject {
             recordingRouteId = snapshot.routeId
             recordingStartedAt = snapshot.recordingStartedAt ?? .now
             samples.removeAll(keepingCapacity: true)
+            lastSyncedNavigationCueSignatureData = cueSignatureData(legs: snapshot.legs)
+            rebuildWatchRouteNavigator(legs: snapshot.legs, sessionStarted: true)
         } else {
             recordingRouteId = snapshot.routeId
+            guard let nextSig = cueSignatureData(legs: snapshot.legs) else {
+                lastSyncedNavigationCueSignatureData = nil
+                rebuildWatchRouteNavigator(legs: snapshot.legs, sessionStarted: true)
+                isRecordingGPS = true
+                startLocationUpdatesIfAuthorized()
+                return
+            }
+            if nextSig != lastSyncedNavigationCueSignatureData {
+                lastSyncedNavigationCueSignatureData = nextSig
+                rebuildWatchRouteNavigator(legs: snapshot.legs, sessionStarted: true)
+            }
         }
 
         isRecordingGPS = true
+        startLocationUpdatesIfAuthorized()
+    }
+
+    private func cueSignatureData(legs: [WalkLegHint]) -> Data? {
+        let cues = legs.map {
+            WalkLegCueSignature(
+                title: $0.title,
+                distanceMeters: $0.distanceMeters,
+                expectedTravelTime: $0.expectedTravelTime,
+                maneuverLatitude: $0.maneuverLatitude,
+                maneuverLongitude: $0.maneuverLongitude
+            )
+        }
+        return try? JSONEncoder().encode(cues)
+    }
+
+    private func startLocationUpdatesIfAuthorized() {
         let auth = locationManager.authorizationStatus
         if auth == .authorizedWhenInUse || auth == .authorizedAlways {
             locationManager.startUpdatingLocation()
@@ -120,7 +188,24 @@ final class WatchWalkCoordinator: NSObject, ObservableObject {
         recordingStartedAt = nil
         samples.removeAll(keepingCapacity: true)
         isRecordingGPS = false
+        routeNavigator = nil
+        isWatchGPSGuidanceActive = false
+        watchNavigationStepIndex = 0
+        distanceToCurrentManeuverMeters = nil
+        isSyncedRouteCuesFinishedOnWatch = false
+        lastSyncedNavigationCueSignatureData = nil
+        updateLocationDistanceFilter()
         locationManager.stopUpdatingLocation()
+    }
+
+    private func updateLocationDistanceFilter() {
+        if isRecordingGPS, isWatchGPSGuidanceActive {
+            locationManager.distanceFilter = Self.navigationDistanceFilterMeters
+        } else if isRecordingGPS {
+            locationManager.distanceFilter = Self.minSampleSeparationMeters
+        } else {
+            locationManager.distanceFilter = Self.minSampleSeparationMeters
+        }
     }
 
     private func transferCurrentRecordingToPhone() {
@@ -179,6 +264,33 @@ final class WatchWalkCoordinator: NSObject, ObservableObject {
         }
         samples.append(GeodesicWaypoint(coordinate))
     }
+
+    private func ingestGPSGuidance(location: CLLocation) {
+        guard isWatchGPSGuidanceActive else {
+            distanceToCurrentManeuverMeters = nil
+            return
+        }
+        guard var navigator = routeNavigator else {
+            distanceToCurrentManeuverMeters = nil
+            return
+        }
+        let priorIndex = navigator.currentIndex
+        navigator.ingest(userLocation: location)
+        routeNavigator = navigator
+        watchNavigationStepIndex = navigator.currentIndex
+        distanceToCurrentManeuverMeters = navigator.distanceToCurrentManeuver(from: location)
+
+        if navigator.currentIndex > priorIndex {
+            WKInterfaceDevice.current().play(.directionUp)
+        }
+
+        if navigator.isComplete {
+            isSyncedRouteCuesFinishedOnWatch = true
+            distanceToCurrentManeuverMeters = nil
+            status =
+                "Last cue on Watch done. If you still have turns, check iPhone—or you may be near the end."
+        }
+    }
 }
 
 extension WatchWalkCoordinator: WCSessionDelegate {
@@ -207,16 +319,40 @@ extension WatchWalkCoordinator: WCSessionDelegate {
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
-        let replyBox = WatchMessageReplyBox(replyHandler)
         if let uuidString = message[WatchMessageKey.requestRecordingFlush.rawValue] as? String,
-           let uuid = UUID(uuidString: uuidString) {
-            Task { @MainActor in
-                let reply = self.buildFlushReply(sessionId: uuid)
-                replyBox(reply)
+           let uuid = UUID(uuidString: uuidString)
+        {
+            struct FlushEnvelope: @unchecked Sendable {
+                let payload: [String: Any]
             }
+
+            let replySnapshot: [String: Any]
+            if Thread.isMainThread {
+                // Avoid blocking the main queue waiting for MainActor work (deadlock otherwise).
+                let envelope = MainActor.assumeIsolated {
+                    FlushEnvelope(payload: buildFlushReply(sessionId: uuid))
+                }
+                replySnapshot = envelope.payload
+            } else {
+                // Flush replies capture MainActor coordinator state while honoring WatchConnectivity’s
+                // expectation that `replyHandler` fire quickly.
+                let holder = FlushReplyHolder([:])
+                let semaphore = DispatchSemaphore(value: 0)
+                Task { @MainActor in
+                    let reply = self.buildFlushReply(sessionId: uuid)
+                    holder.reply = reply
+                    semaphore.signal()
+                }
+                semaphore.wait()
+                replySnapshot = holder.reply
+            }
+            replyHandler(replySnapshot)
             return
         }
 
+        // Reachable counterpart uses `sendMessage` for snapshots; acknowledging immediately avoids
+        // system termination of this extension before the reply is delivered.
+        replyHandler([:])
         let walkData = message[WatchMessageKey.activeWalk.rawValue] as? Data
         let shouldClear = message[WatchMessageKey.clearWalk.rawValue] != nil
         Task { @MainActor in
@@ -226,9 +362,14 @@ extension WatchWalkCoordinator: WCSessionDelegate {
             if shouldClear {
                 self.clearWalkUI()
             }
-            replyBox([:])
         }
     }
+}
+
+/// Holds a Connectivity reply dictionary across a semaphore boundary (`[String: Any]` is not `Sendable`).
+private final class FlushReplyHolder: @unchecked Sendable {
+    var reply: [String: Any]
+    init(_ reply: [String: Any]) { self.reply = reply }
 }
 
 extension WatchWalkCoordinator: CLLocationManagerDelegate {
@@ -245,6 +386,7 @@ extension WatchWalkCoordinator: CLLocationManagerDelegate {
         guard let loc = locations.last else { return }
         Task { @MainActor in
             self.appendSampleIfNeeded(loc.coordinate)
+            self.ingestGPSGuidance(location: loc)
         }
     }
 

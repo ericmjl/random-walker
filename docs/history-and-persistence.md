@@ -9,7 +9,7 @@
 | **Start** → after walking **≥ ~90 m** from the start point, dwell **≥ ~10 s** within **~40 m** of that start | **Yes** — **Returned to start** (same GPS trace / fallback rules as below). |
 | **Stop guidance** → **Save to history** | **Yes** — **Saved when stopped** (incomplete guidance allowed). |
 | **Stop guidance** → **Discard** | **No** — trace discarded. |
-| **Clear map** | Clears the active session and watch context only; **does not** delete existing history rows. |
+| **Remove route from map** | Clears the active session and watch context only; **does not** delete existing history rows. |
 
 In **History**, swipe left on a row and tap **Delete** to remove that `WalkRecord`.
 

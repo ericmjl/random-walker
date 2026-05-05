@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build, install, and launch RandomWalker on a paired iPhone + Watch simulator.
 
-Xcode has no single \"Run both\" action for separate schemes. This script is the
-one-liner equivalent: pick an active device pair (or pass UDIDs), boot both
-simulators, ``xcodebuild`` the iOS app and the watch app, ``simctl install`` +
+Runs ``xcodebuild`` for ``RandomWalker`` once; **RandomWalkerWatch** is embedded under
+``RandomWalker.app/Watch/`` so WatchConnectivity reports the companion as installed (required on Simulator).
+
+Pick an active device pair (or pass UDIDs), boot both simulators, ``simctl install`` +
 ``launch`` each.
 
 Usage (from repo root)::
@@ -33,7 +34,6 @@ from typing import Any, cast
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 IOS_SCHEME = "RandomWalker"
-WATCH_SCHEME = "RandomWalkerWatch"
 IOS_BUNDLE = "dev.ericmjl.randomwalker"
 WATCH_BUNDLE = "dev.ericmjl.randomwalker.watchkitapp"
 XCODEPROJ = REPO_ROOT / "RandomWalker.xcodeproj"
@@ -166,26 +166,15 @@ def _build_install_launch(
         raise SystemExit(1)
     _run(["xcrun", "simctl", "install", phone_udid, str(ios_app)])
 
-    _run(
-        [
-            "xcodebuild",
-            "-project",
-            str(XCODEPROJ),
-            "-scheme",
-            WATCH_SCHEME,
-            "-destination",
-            f"platform=watchOS Simulator,id={watch_udid}",
-            "-derivedDataPath",
-            str(DERIVED),
-            "build",
-        ],
-        cwd=REPO_ROOT,
-    )
-    watch_app = DERIVED / "Build" / "Products" / "Debug-watchsimulator" / "RandomWalkerWatch.app"
-    if not watch_app.is_dir():
-        print(f"Expected watch app at {watch_app}", file=sys.stderr)
+    embedded_watch_app = ios_app / "Watch" / "RandomWalkerWatch.app"
+    if not embedded_watch_app.is_dir():
+        print(
+            f"Embedded watch app missing at {embedded_watch_app}. "
+            "Rebuild the RandomWalker scheme (watch companion must embed).",
+            file=sys.stderr,
+        )
         raise SystemExit(1)
-    _run(["xcrun", "simctl", "install", watch_udid, str(watch_app)])
+    _run(["xcrun", "simctl", "install", watch_udid, str(embedded_watch_app)])
 
     _run(["xcrun", "simctl", "launch", phone_udid, IOS_BUNDLE])
     _run(["xcrun", "simctl", "launch", watch_udid, WATCH_BUNDLE])
@@ -214,7 +203,14 @@ def main() -> int:
         watch_udid=watch_udid,
         skip_xcodegen=args.skip_xcodegen,
     )
-    print("Launched iOS and watchOS apps on the paired simulators.", file=sys.stderr)
+    print(
+        "Launched iOS and watchOS apps on the paired simulators.\n"
+        "Watch: companion is bundled at RandomWalker.app/Watch/RandomWalkerWatch.app "
+        "(required for WatchConnectivity on Simulator).\n"
+        "Open **Random Walker** on the Watch grid/List View after install; "
+        "re-run this script after Erase or if the icon is missing.",
+        file=sys.stderr,
+    )
     return 0
 
 

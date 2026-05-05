@@ -262,13 +262,13 @@ final class WalkSessionViewModel {
     }
 
     var navigationStepCount: Int {
-        routeNavigator?.steps.count ?? 0
+        routeNavigator?.legs.count ?? 0
     }
 
     /// Index used for on-screen directions and map annotations (browse override or live step).
     var navigationDisplayedStepIndex: Int {
-        guard let nav = routeNavigator, !nav.steps.isEmpty else { return 0 }
-        let maxIdx = nav.steps.count - 1
+        guard let nav = routeNavigator, !nav.legs.isEmpty else { return 0 }
+        let maxIdx = nav.legs.count - 1
         let live = min(max(0, nav.currentIndex), maxIdx)
         if let browse = navigationBrowseStepIndex {
             return min(max(0, browse), maxIdx)
@@ -287,8 +287,8 @@ final class WalkSessionViewModel {
 
     func startNavigation(seedLocation: CLLocation?, connectivity: PhoneConnectivityManager) {
         guard let walk = refinedWalk else { return }
-        let steps = WalkRouteNavigator.flattenedSteps(from: walk)
-        guard !steps.isEmpty else { return }
+        let hints = walk.flattenedWalkLegHints(maxHints: nil)
+        guard !hints.isEmpty else { return }
         recordedNavigationPath = []
         navigationStartedAt = .now
         navigationStartCoordinate = seedLocation?.coordinate ?? walk.coordinates.first
@@ -299,7 +299,7 @@ final class WalkSessionViewModel {
         if let coord = seedLocation?.coordinate {
             recordedNavigationPath.append(coord)
         }
-        routeNavigator = WalkRouteNavigator(steps: steps)
+        routeNavigator = WalkRouteNavigator(legs: hints)
         navigationBrowseStepIndex = nil
         navigationCompletionNotice = nil
         isNavigating = true
@@ -428,17 +428,17 @@ final class WalkSessionViewModel {
         return location.distance(from: end)
     }
 
-    /// Straight-line distance left to the maneuver for the **live** step, plus summed `RoutedNavigationStep.distance` for subsequent steps.
+    /// Straight-line distance left to the maneuver for the **live** step, plus summed step segment lengths from Maps for subsequent steps.
     ///
     /// Uses the live ``navigationStepIndex`` (not the paged browse index) so trip stats stay aligned with progress.
     func navigationRemainingDistanceApprox(from location: CLLocation) -> CLLocationDistance? {
         guard let nav = routeNavigator else { return nil }
         let i = navigationStepIndex
-        guard i < nav.steps.count else { return 0 }
-        var total = distanceToManeuver(forStepIndex: i, from: location) ?? nav.steps[i].distance
-        if (i + 1) < nav.steps.count {
-            for j in (i + 1) ..< nav.steps.count {
-                total += nav.steps[j].distance
+        guard i < nav.legs.count else { return 0 }
+        var total = distanceToManeuver(forStepIndex: i, from: location) ?? nav.legs[i].distanceMeters
+        if (i + 1) < nav.legs.count {
+            for j in (i + 1) ..< nav.legs.count {
+                total += nav.legs[j].distanceMeters
             }
         }
         return max(0, total)
@@ -456,25 +456,19 @@ final class WalkSessionViewModel {
     }
 
     func maneuverCoordinate(forStepIndex stepIndex: Int) -> CLLocationCoordinate2D? {
-        guard let nav = routeNavigator,
-              stepIndex >= 0,
-              stepIndex < nav.steps.count else { return nil }
-        return nav.steps[stepIndex].maneuverCoordinate
+        routeNavigator?.maneuverCoordinate(forStepIndex: stepIndex)
     }
 
     private func instructionDisplayString(at stepIndex: Int) -> String? {
-        guard let nav = routeNavigator,
-              stepIndex >= 0,
-              stepIndex < nav.steps.count else { return nil }
-        let raw = nav.steps[stepIndex].instruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        return raw.isEmpty ? "Continue" : raw
+        guard let nav = routeNavigator else { return nil }
+        return nav.instructionDisplayString(forStepIndex: stepIndex)
     }
 
     private func thenDisplayString(afterStepIndex stepIndex: Int) -> String? {
         guard let nav = routeNavigator else { return nil }
         let next = stepIndex + 1
-        guard next < nav.steps.count else { return nil }
-        let text = nav.steps[next].instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard next < nav.legs.count else { return nil }
+        let text = nav.legs[next].title.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : "Then \(text)"
     }
 
@@ -501,7 +495,7 @@ final class WalkSessionViewModel {
             )
             refinedWalk = resumed
             navigationBrowseStepIndex = nil
-            routeNavigator = WalkRouteNavigator(steps: WalkRouteNavigator.flattenedSteps(from: resumed))
+            routeNavigator = WalkRouteNavigator(legs: resumed.flattenedWalkLegHints(maxHints: nil))
             connectivity.sendActiveWalk(
                 resumed.makeWatchSnapshot(
                     startedAt: navigationStartedAt ?? .now,

@@ -7,7 +7,7 @@ public enum RoutedWalkNavigationProgress: Sendable {
     /// Leg *i* of a routed walk travels from ``visitSequence[i]`` to ``visitSequence[i + 1]``.
     /// While the user is still on that leg, the next major waypoint is at index *i + 1*.
     /// - Parameters:
-    ///   - flattenedStepIndex: Zero-based index into concatenated `WalkRouteNavigator` steps.
+    ///   - flattenedStepIndex: Zero-based index into concatenated MapKit-derived walk-leg steps (`WalkLegHint` / ``WalkRouteNavigator``).
     ///   - legStepCounts: Number of MapKit steps per leg, in visit order.
     /// - Returns: Next visit index, or `nil` if the navigator index is past all steps.
     public static func nextVisitSequenceIndex(

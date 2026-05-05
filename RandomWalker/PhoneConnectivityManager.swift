@@ -13,6 +13,9 @@ final class PhoneConnectivityManager: NSObject, ObservableObject {
     private var pendingWalk: ActiveWalkSnapshot?
     private var pendingClear: Bool = false
 
+    /// Last walk pushed successfully to the counterpart; replayed when reachability becomes true (sim pairing is flaky).
+    private var lastSyncedWalk: ActiveWalkSnapshot?
+
     override init() {
         super.init()
         guard WCSession.isSupported() else { return }
@@ -31,7 +34,60 @@ final class PhoneConnectivityManager: NSObject, ObservableObject {
         guard WCSession.isSupported() else { return }
         pendingWalk = nil
         pendingClear = true
+        lastSyncedWalk = nil
         flushWatchOutboundIfReady()
+    }
+
+    private func encodedActiveWalkPayload(_ snapshot: ActiveWalkSnapshot) -> [String: Any]? {
+        guard let data = try? JSONEncoder().encode(snapshot) else {
+            RotatingFileLogger.shared.log("watchConnectivity", "ActiveWalkSnapshot encode failed.")
+            return nil
+        }
+        if data.count >= 62_000 {
+            RotatingFileLogger.shared.log(
+                "watchConnectivity",
+                "Active walk JSON is \(data.count) bytes — may exceed WatchConnectivity application-context limits."
+            )
+        }
+        return [WatchMessageKey.activeWalk.rawValue: data]
+    }
+
+    /// Always updates application context so the wearable sees the snapshot even when ``sendMessage`` drops; optionally sends immediately when reachable.
+    private func pushActiveWalkToCounterpart(_ snapshot: ActiveWalkSnapshot) {
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        guard let payload = encodedActiveWalkPayload(snapshot) else { return }
+        lastSyncedWalk = snapshot
+
+        let dataByteCount = (payload[WatchMessageKey.activeWalk.rawValue] as? Data)?.count ?? 0
+
+        do {
+            try session.updateApplicationContext(payload)
+        } catch {
+            RotatingFileLogger.shared.log(
+                "watchConnectivity",
+                "updateApplicationContext failed (\(error.localizedDescription)); \(dataByteCount) bytes."
+            )
+        }
+
+        guard session.isReachable else { return }
+        // Reply/error handlers must be @Sendable: WCSession invokes them on its own queues, never MainActor.
+        session.sendMessage(
+            payload,
+            replyHandler: { @Sendable _ in },
+            errorHandler: { @Sendable sendError in
+                RotatingFileLogger.shared.log(
+                    "watchConnectivity",
+                    "sendMessage(activeWalk) failed — \(sendError.localizedDescription)"
+                )
+            }
+        )
+    }
+
+    /// If we already synced a route, pairing flaps can omit delivery — push again when reachable.
+    private func replayLastSyncedWalkIfNeeded() {
+        guard let snapshot = lastSyncedWalk else { return }
+        pushActiveWalkToCounterpart(snapshot)
     }
 
     private func flushWatchOutboundIfReady() {
@@ -39,29 +95,33 @@ final class PhoneConnectivityManager: NSObject, ObservableObject {
         guard session.activationState == .activated else { return }
 
         if let snapshot = pendingWalk {
-            guard let data = try? JSONEncoder().encode(snapshot) else {
-                pendingWalk = nil
-                return
-            }
-            let payload: [String: Any] = [WatchMessageKey.activeWalk.rawValue: data]
             pendingWalk = nil
-            if session.isReachable {
-                session.sendMessage(payload, replyHandler: { _ in }, errorHandler: { _ in
-                    try? session.updateApplicationContext(payload)
-                })
-            } else {
-                try? session.updateApplicationContext(payload)
-            }
+            pushActiveWalkToCounterpart(snapshot)
             return
         }
 
         if pendingClear {
             let payload: [String: Any] = [WatchMessageKey.clearWalk.rawValue: Data()]
             pendingClear = false
-            try? session.updateApplicationContext(payload)
-            if session.isReachable {
-                session.sendMessage(payload, replyHandler: { _ in }, errorHandler: { _ in })
+            do {
+                try session.updateApplicationContext(payload)
+            } catch {
+                RotatingFileLogger.shared.log(
+                    "watchConnectivity",
+                    "updateApplicationContext(clearWalk) failed — \(error.localizedDescription)."
+                )
             }
+            guard session.isReachable else { return }
+            session.sendMessage(
+                payload,
+                replyHandler: { @Sendable _ in },
+                errorHandler: { @Sendable sendError in
+                    RotatingFileLogger.shared.log(
+                        "watchConnectivity",
+                        "sendMessage(clearWalk) failed — \(sendError.localizedDescription)"
+                    )
+                }
+            )
         }
     }
 
@@ -73,16 +133,17 @@ final class PhoneConnectivityManager: NSObject, ObservableObject {
         return await withCheckedContinuation { continuation in
             session.sendMessage(
                 [WatchMessageKey.requestRecordingFlush.rawValue: sessionId.uuidString],
-                replyHandler: { reply in
-                    guard let data = reply[WatchMessageKey.recordedTrack.rawValue] as? Data,
-                          let track = try? JSONDecoder().decode(WatchRecordedTrack.self, from: data)
-                    else {
-                        continuation.resume(returning: nil)
-                        return
+                replyHandler: { @Sendable reply in
+                    let track: WatchRecordedTrack?
+                    if let data = reply[WatchMessageKey.recordedTrack.rawValue] as? Data,
+                       let decoded = try? JSONDecoder().decode(WatchRecordedTrack.self, from: data) {
+                        track = decoded
+                    } else {
+                        track = nil
                     }
                     continuation.resume(returning: track)
                 },
-                errorHandler: { _ in
+                errorHandler: { @Sendable _ in
                     continuation.resume(returning: nil)
                 }
             )
@@ -109,6 +170,9 @@ extension PhoneConnectivityManager: WCSessionDelegate {
         let reachable = session.isReachable
         Task { @MainActor in
             isReachable = reachable
+            if reachable {
+                replayLastSyncedWalkIfNeeded()
+            }
         }
     }
 
