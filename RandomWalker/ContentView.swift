@@ -70,23 +70,16 @@ struct PlanWalkView: View {
             Group {
                 if session.isNavigating {
                     turnByTurnWithMapView
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .padding()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     planAndMapScrollContent
                 }
             }
+            .toolbar(session.isNavigating ? .hidden : .automatic, for: .navigationBar)
             .navigationTitle(session.isNavigating ? "" : "Random Walker")
             .navigationBarTitleDisplayMode(session.isNavigating ? .inline : .large)
             .toolbar {
-                if session.isNavigating {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("End walk", systemImage: "xmark.circle") {
-                            showStopGuidanceConfirmation = true
-                        }
-                        .accessibilityLabel("End walk")
-                    }
-                } else if session.refinedWalk != nil {
+                if session.refinedWalk != nil, !session.isNavigating {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Clear map", systemImage: "xmark.circle") {
                             session.clearActiveWalk(connectivity: connectivity)
@@ -225,50 +218,56 @@ struct PlanWalkView: View {
     /// During **Start walk**: map-first full-bleed layout with a top instruction card, bottom trip sheet, and floating controls (Apple Maps–inspired).
     @ViewBuilder
     private var turnByTurnWithMapView: some View {
-        GeometryReader { geo in
-            let hasSteps = session.navigationStepCount > 0
-            ZStack(alignment: .bottom) {
-                WalkMapCard(
-                    coordinates: session.refinedWalk?.coordinates ?? [],
-                    userCoordinate: locationService.lastLocation?.coordinate,
-                    isNavigating: true,
-                    userCourse: userCourseFromLocation,
-                    maneuverCoordinate: session.maneuverCoordinateForNavigation(),
-                    navigationStepIndex: session.navigationDisplayedStepIndex,
-                    isBrowsingStepsAwayFromLive: session.isBrowsingAwayFromLiveNavigationStep,
-                    showRouteOverview: navigationShowsRouteOverview
-                )
-                .frame(width: geo.size.width, height: geo.size.height)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        /// Symmetric gutter so maneuver + trip strips stay centered regardless of notch/Dynamic Island insets on each side.
+        let horizontalInset: CGFloat = 14
+        let hasSteps = session.navigationStepCount > 0
+        ZStack {
+            WalkMapCard(
+                coordinates: session.refinedWalk?.coordinates ?? [],
+                userCoordinate: locationService.lastLocation?.coordinate,
+                isNavigating: true,
+                userCourse: userCourseFromLocation,
+                maneuverCoordinate: session.maneuverCoordinateForNavigation(),
+                navigationStepIndex: session.navigationDisplayedStepIndex,
+                isBrowsingStepsAwayFromLive: session.isBrowsingAwayFromLiveNavigationStep,
+                showRouteOverview: navigationShowsRouteOverview
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Map bleeds under status / home bar; overlay stacks stay in the safe region (see top/bottom stacks).
+            .ignoresSafeArea(edges: [.vertical, .leading, .trailing])
 
-                if hasSteps {
-                    VStack(spacing: 0) {
-                        navigationTopInstructionStack(maxWidth: geo.size.width)
-                        Spacer(minLength: 0)
-                    }
-                    .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
-
-                    VStack(spacing: 10) {
-                        Spacer(minLength: 0)
-                        HStack(alignment: .bottom) {
-                            Spacer(minLength: 0)
-                            navigationFloatingControlStack
-                        }
-                        navigationBottomTripSheet
-                    }
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 8)
+            if hasSteps {
+                VStack(spacing: 0) {
+                    navigationTopInstructionStack()
+                        .frame(maxWidth: .infinity)
+                    Spacer(minLength: 0)
                 }
+                .padding(.horizontal, horizontalInset)
+                /// Extra slack below the Dynamic Island / notch so the maneuver card is not clipped by display corners.
+                .safeAreaPadding(.top, 12)
+                .padding(.top, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                VStack(spacing: 10) {
+                    Spacer(minLength: 0)
+                    HStack(alignment: .bottom) {
+                        Spacer(minLength: 0)
+                        navigationFloatingControlStack
+                            .padding(.trailing, horizontalInset + 2)
+                    }
+                    navigationBottomTripDrawer
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
         }
+        .background(Color.clear)
     }
 
     /// Top card + **Follow live** when paging away from the GPS step.
     @ViewBuilder
-    private func navigationTopInstructionStack(maxWidth: CGFloat) -> some View {
+    private func navigationTopInstructionStack() -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            navigationGuidancePagerCard(maxWidth: maxWidth)
+            navigationGuidancePagerCard()
             if session.isBrowsingAwayFromLiveNavigationStep {
                 Button("Follow live") {
                     session.clearNavigationBrowse()
@@ -278,32 +277,37 @@ struct PlanWalkView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.top, 4)
+        .frame(maxWidth: .infinity)
     }
 
     /// Swipe between maneuvers inside a high-contrast banner (page dots hidden; edge chevrons hint paging).
+    ///
+    /// `TabView` page style does not reliably expand horizontally; force `maxWidth: .infinity` on the pager and constrain height separately.
     @ViewBuilder
-    private func navigationGuidancePagerCard(maxWidth: CGFloat) -> some View {
-        let cardHeight: CGFloat = min(200, max(132, maxWidth * 0.34))
+    private func navigationGuidancePagerCard() -> some View {
+        let cardHeight: CGFloat = 156
         ZStack {
             if session.navigationStepCount > 1 {
                 TabView(selection: navigationStepPageSelection) {
                     ForEach(0 ..< session.navigationStepCount, id: \.self) { stepIdx in
                         navigationGuidancePage(stepIndex: stepIdx)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .tag(stepIdx)
                             .padding(.horizontal, 18)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
+                .frame(maxWidth: .infinity, minHeight: cardHeight, maxHeight: cardHeight)
                 .accessibilityHint("Swipe left or right to view other steps on this route.")
             } else if session.navigationStepCount == 1 {
                 TabView(selection: navigationStepPageSelection) {
                     navigationGuidancePage(stepIndex: 0)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .tag(0)
                         .padding(.horizontal, 18)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
+                .frame(maxWidth: .infinity, minHeight: cardHeight, maxHeight: cardHeight)
             }
 
             HStack(spacing: 0) {
@@ -377,61 +381,96 @@ struct PlanWalkView: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
-    private var navigationBottomTripSheet: some View {
+    /// Bottom trip UI as an edge-to-edge **floating panel** (maps vocabulary: bottom / accessory sheet) with vibrancy (`Material` = system “glassy” surfaces).
+    private var navigationBottomTripDrawer: some View {
         let pace = max(0.5, walkingPace.effectiveWalkingSpeedMetersPerSecond)
         let loc = locationService.lastLocation
         let remainingMeters = loc.flatMap { session.navigationRemainingDistanceApprox(from: $0) }
         let remainingSeconds = loc.flatMap { session.navigationRemainingDurationApprox(from: $0, walkingSpeedMetersPerSecond: pace) }
         let arrival: Date? = remainingSeconds.map { Date().addingTimeInterval($0) }
 
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Arrive")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(arrival.map { PlanWalkView.formatShortTime($0) } ?? "—")
-                        .font(.title3.weight(.bold))
+        let drawerTopRadii: CGFloat = 28
+        let drawerShape = UnevenRoundedRectangle(
+            topLeadingRadius: drawerTopRadii,
+            bottomLeadingRadius: 0,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: drawerTopRadii,
+            style: .continuous
+        )
+
+        return VStack(alignment: .leading, spacing: 0) {
+            Capsule()
+                .fill(.secondary.opacity(0.35))
+                .frame(width: 36, height: 5)
+                .padding(.top, 10)
+                .frame(maxWidth: .infinity)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Arrive")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(arrival.map { PlanWalkView.formatShortTime($0) } ?? "—")
+                            .font(.title3.weight(.bold))
+                    }
+                    Spacer(minLength: 12)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Time")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(remainingSeconds.map { PlanWalkView.formatMinutesRounded($0) } ?? "—")
+                            .font(.title3.weight(.bold))
+                    }
+                    Spacer(minLength: 12)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Distance")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(remainingMeters.map { PlanWalkView.formatDistanceMeters($0) } ?? "—")
+                            .font(.title3.weight(.bold))
+                    }
                 }
-                Spacer(minLength: 12)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Time")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(remainingSeconds.map { PlanWalkView.formatMinutesRounded($0) } ?? "—")
-                        .font(.title3.weight(.bold))
+                Button {
+                    showStopGuidanceConfirmation = true
+                } label: {
+                    Label("End walk", systemImage: "xmark.circle.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
                 }
-                Spacer(minLength: 12)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Distance")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(remainingMeters.map { PlanWalkView.formatDistanceMeters($0) } ?? "—")
-                        .font(.title3.weight(.bold))
-                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red.opacity(0.92))
             }
-            Button {
-                showStopGuidanceConfirmation = true
-            } label: {
-                Label("End walk", systemImage: "xmark.circle.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.red.opacity(0.92))
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(.ultraThickMaterial)
+            ZStack {
+                drawerShape
+                    .fill(.regularMaterial)
+                drawerShape
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.45),
+                                Color.white.opacity(0.12),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.75
+                    )
+            }
+            .shadow(color: .black.opacity(0.22), radius: 28, y: -6)
         }
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(.primary.opacity(0.08), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+        /// Keeps primary controls above the home indicator; frosted background can extend into that zone.
+        .safeAreaPadding(.bottom, 8)
+        .clipShape(drawerShape)
+        .ignoresSafeArea(edges: .bottom)
     }
 
     @ViewBuilder
@@ -763,8 +802,15 @@ private struct WalkMapCard: View {
             }
     }
 
+    /// During live chase-navigation, keep pan/rotation off so a programmatic **MapCamera** keeps heading + tilt; allow **zoom** only (pinching does not flatten the map the way dragging does).
+    private var navigationMapInteractionModes: MapInteractionModes {
+        guard isNavigating else { return .all }
+        if showRouteOverview || isBrowsingStepsAwayFromLive { return .all }
+        return .zoom
+    }
+
     private var mapContent: some View {
-        Map(position: $cameraPosition, interactionModes: .all) {
+        Map(position: $cameraPosition, interactionModes: navigationMapInteractionModes) {
             if let userCoordinate {
                 if isNavigating {
                     Annotation("", coordinate: userCoordinate) {
@@ -910,7 +956,8 @@ private struct WalkMapCard: View {
         cameraPosition = .region(region)
     }
 
-    /// Apple Maps–style chase camera: slight pitch, heading from GPS course or bearing toward the maneuver.
+    /// Apple Maps–style chase camera: strong forward pitch + heading from GPS course or bearing toward the maneuver.
+    /// Pan/pitch gestures stay off in this mode (see ``navigationMapInteractionModes``) so the tilt is not flattened by MapKit.
     private func applyNavigationFollowCamera() {
         guard isNavigating, let userCoordinate else { return }
         let heading: CLLocationDirection
@@ -924,9 +971,9 @@ private struct WalkMapCard: View {
         navigationCameraHeading = heading
         let camera = MapCamera(
             centerCoordinate: userCoordinate,
-            distance: 240,
+            distance: 175,
             heading: heading,
-            pitch: 35
+            pitch: 54
         )
         cameraPosition = .camera(camera)
     }
