@@ -37,7 +37,7 @@ scripts/install_randomwalker_ios_device.py --skip-build --no-launch --skip-xcode
 
 - **Provisioning**: Xcode must already have downloaded a provisioning profile for `dev.ericmjl.randomwalker` (open the project once in Xcode or rely on `-allowProvisioningUpdates` during the scripted build).
 - **Launch**: Automatic launch after install may fail while the phone is **locked**. Unlock first, open the icon, or run the `devicectl process launch …` line the script prints.
-- **Apple Watch companion**: Not covered here; simulator pairing still uses `./scripts/run_ios_watch_sim_pair.py`.
+- **Apple Watch companion**: The same install pushes `RandomWalker.app/Watch/` to the paired watch when the OS syncs companion apps after the iPhone build (watchOS validates the embedded bundle—**the Watch target must compile an asset catalog so `Assets.car` and `CFBundleIcons` are present**). If the Watch says the app cannot be installed, reinstall after a device build (`scripts/install_randomwalker_ios_device.py`) and confirm the paired watch meets `watchOS` **10** in [`project.yml`](../project.yml). Simulator installs still use `./scripts/run_ios_watch_sim_pair.py`.
 
 Details and prerequisites for automation agents live in **[AGENTS.md](../AGENTS.md)** (physical iPhone subsection).
 

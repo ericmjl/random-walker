@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		176753C5F6A3DF342265CDDC /* LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706E219E4A0BD23F2E61EE39 /* LocationService.swift */; };
 		1FFB668E325E2F320EFEC465 /* RotatingFileLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A1ACC22C963948EFEA091E0 /* RotatingFileLogger.swift */; };
+		20136E338C198043EAA0BC00 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CAE3EEC780A64199F0CDA092 /* Assets.xcassets */; };
 		394F36ADA048E287EDB37978 /* NewRoutePlanningSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2703407EF9BD162BD0FDF2E6 /* NewRoutePlanningSheet.swift */; };
 		3A162661AB6BF0915AA658F9 /* RoutedWalk+Navigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18BF2356A49770EA5E9F3AB9 /* RoutedWalk+Navigation.swift */; };
 		472DA362C8344FF80778FE4D /* RoutedWalk+Watch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 844AD4997E98C2B1C6129D8A /* RoutedWalk+Watch.swift */; };
@@ -79,6 +80,7 @@
 		899BB645866245C5182302E2 /* WalkRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkRecord.swift; sourceTree = "<group>"; };
 		A0003FCD87AFB260126858D0 /* PhoneConnectivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneConnectivityManager.swift; sourceTree = "<group>"; };
 		C44869965EBE4CF09A32999A /* WatchWalkCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchWalkCoordinator.swift; sourceTree = "<group>"; };
+		CAE3EEC780A64199F0CDA092 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		D5EC677855DCB943578493B7 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		EB02B2A151707A524A8D4F57 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -166,6 +168,7 @@
 		F7FDA8396E168E42BCB6B137 /* RandomWalkerWatch */ = {
 			isa = PBXGroup;
 			children = (
+				CAE3EEC780A64199F0CDA092 /* Assets.xcassets */,
 				EB02B2A151707A524A8D4F57 /* Info.plist */,
 				3FFF02AF5AD67572B72DF357 /* RandomWalkerWatchApp.swift */,
 				55D9389BF676625FA9C6DD43 /* RandomWalkerWatchRootView.swift */,
@@ -190,6 +193,7 @@
 			buildConfigurationList = 99C18AC23B94505467792516 /* Build configuration list for PBXNativeTarget "RandomWalkerWatch" */;
 			buildPhases = (
 				5D06B21E5F5DD09BBFB95E13 /* Sources */,
+				E4DD5D311B130F84F17ABB9C /* Resources */,
 				72A1A1A162F49531389AF51F /* Frameworks */,
 			);
 			buildRules = (
@@ -292,6 +296,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				D4D7E6CB8CE8227514D912BC /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E4DD5D311B130F84F17ABB9C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				20136E338C198043EAA0BC00 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
